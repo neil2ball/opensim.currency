@@ -211,6 +211,10 @@ namespace OpenSim.Modules.Currency
 
         private NSLCertificateVerify m_certVerify = new NSLCertificateVerify(); // For server authentication
 
+        // Redirect configuration
+        private bool   m_redirectEnabled = true;
+        private string m_redirectUrl = "https://eudaimon.me/microtokens/";
+        private string m_redirectMessage = "Please visit our website to purchase currency";
 
         /// <summary>   
         /// Scene dictionary indexed by Region Handle   
@@ -323,6 +327,13 @@ namespace OpenSim.Modules.Currency
                 m_use_web_settle = economyConfig.GetBoolean("SettlementByWeb",   m_use_web_settle);
                 m_settle_url     = economyConfig.GetString ("SettlementURL",     m_settle_url);
                 m_settle_message = economyConfig.GetString ("SettlementMessage", m_settle_message);
+
+                // Redirect configuration
+                m_redirectEnabled = economyConfig.GetBoolean("RedirectEnabled", m_redirectEnabled);
+                m_redirectUrl = economyConfig.GetString("RedirectUrl", m_redirectUrl);
+                m_redirectMessage = economyConfig.GetString("RedirectMessage", m_redirectMessage);
+                
+                m_log.InfoFormat("[MONEY MODULE]: Currency redirect enabled: {0}, URL: {1}", m_redirectEnabled, m_redirectUrl);
 
                 // Price
                 PriceEnergyUnit         = economyConfig.GetInt  ("PriceEnergyUnit",         PriceEnergyUnit);
@@ -1068,6 +1079,33 @@ namespace OpenSim.Modules.Currency
         {
             //m_log.InfoFormat("[MONEY MODULE]: AddBankerMoneyHandler:");
 
+            if (m_redirectEnabled)
+            {
+                Hashtable requestParam = (Hashtable)request.Params[0];
+                UUID userID = UUID.Zero;
+                
+                if (requestParam.ContainsKey("clientUUID"))
+                    UUID.TryParse((string)requestParam["clientUUID"], out userID);
+                    
+                int amount = requestParam.ContainsKey("amount") ? (int)requestParam["amount"] : 0;
+                
+                m_log.InfoFormat("[MONEY MODULE]: AddBankerMoneyHandler: Redirecting currency purchase for user {0}", userID);
+                
+                // Notify the user in-world about the redirect
+                NotifyUserAboutRedirect(userID, amount);
+                
+                XmlRpcResponse resp = new XmlRpcResponse();
+                Hashtable paramTable = new Hashtable();
+                paramTable["success"] = false;
+                paramTable["redirect"] = true;
+                paramTable["message"] = m_redirectMessage;
+                paramTable["url"] = m_redirectUrl;
+                paramTable["settle"] = false;
+                
+                resp.Value = paramTable;
+                return resp;
+            }
+
             bool ret = false;
 
             if (request.Params.Count>0)
@@ -1460,6 +1498,13 @@ namespace OpenSim.Modules.Currency
         {
             //m_log.InfoFormat("[MONEY MODULE]: AddBankerMoney:");
 
+            if (m_redirectEnabled)
+            {
+                m_log.InfoFormat("[MONEY MODULE]: AddBankerMoney: Redirecting purchase for user {0}", bankerID);
+                NotifyUserAboutRedirect(bankerID, amount);
+                return false; // Indicate that purchase was redirected
+            }
+
             bool ret = false;
             m_settle_user = false;
 
@@ -1494,6 +1539,42 @@ namespace OpenSim.Modules.Currency
             //else m_log.ErrorFormat("[MONEY MODULE]: AddBankerMoney: Money Server is not available!!");
 
             return ret;
+        }
+
+
+        private void NotifyUserAboutRedirect(UUID userID, int amount)
+        {
+            try
+            {
+                IClientAPI client = GetLocateClient(userID);
+                if (client != null)
+                {
+                    // Send alert message
+                    client.SendAlertMessage($"Currency purchase of {amount} units requires external verification.");
+                    
+                    // Send detailed notification via dialog
+                    Scene scene = (Scene)client.Scene;
+                    IDialogModule dlg = scene.RequestModuleInterface<IDialogModule>();
+                    if (dlg != null)
+                    {
+                        dlg.SendUrlToUser(
+                            userID, 
+                            "Currency Purchase Required", 
+                            UUID.Zero, 
+                            UUID.Zero, 
+                            false, 
+                            $"{m_redirectMessage}\n\nAmount: {amount} units", 
+                            m_redirectUrl
+                        );
+                    }
+                    
+                    m_log.InfoFormat("[MONEY MODULE]: Notified user {0} about currency redirect", userID);
+                }
+            }
+            catch (Exception ex)
+            {
+                m_log.WarnFormat("[MONEY MODULE]: Error notifying user about redirect: {0}", ex.Message);
+            }
         }
 
 

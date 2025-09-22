@@ -40,4 +40,9 @@
     ;SettlementByWeb   = false
     ;SettlementURL     = "http://www.jogrid.net"
     ;SettlementMessage = "Goto the settlement of accounts Web page. (Testing now)"
+	
+	RedirectEnabled = true
+	RedirectUrl = https://eudaimon.me/microtokens/
+	RedirectMessage = Please visit our website to purchase currency
+
 
