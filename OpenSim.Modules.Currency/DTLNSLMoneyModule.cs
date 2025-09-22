@@ -35,6 +35,8 @@ using System.Net;
 using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Web;
+using System.IO;
 
 using log4net;
 using Nini.Config;
@@ -216,6 +218,12 @@ namespace OpenSim.Modules.Currency
         private string m_redirectUrl = "https://eudaimon.me/microtokens/";
         private string m_redirectMessage = "Please visit our website to purchase currency";
 
+        // REST API configuration
+        private string m_restBaseUrl = string.Empty;
+        private string m_consumerKey = string.Empty;
+        private string m_consumerSecret = string.Empty;
+        private bool m_useRestApi = false;
+
         /// <summary>   
         /// Scene dictionary indexed by Region Handle   
         /// </summary>   
@@ -290,6 +298,14 @@ namespace OpenSim.Modules.Currency
 
                 m_sellEnabled  = economyConfig.GetBoolean("SellEnabled", m_sellEnabled);
                 m_moneyServURL = economyConfig.GetString("CurrencyServer", m_moneyServURL);
+
+                // REST API configuration
+                m_useRestApi = economyConfig.GetBoolean("UseRestApi", false);
+                m_restBaseUrl = economyConfig.GetString("RestBaseUrl", m_restBaseUrl);
+                m_consumerKey = economyConfig.GetString("ConsumerKey", m_consumerKey);
+                m_consumerSecret = economyConfig.GetString("ConsumerSecret", m_consumerSecret);
+
+                m_log.InfoFormat("[MONEY MODULE]: REST API enabled: {0}, Base URL: {1}", m_useRestApi, m_restBaseUrl);
 
                 // Client Certification   // クライアント証明書
                 m_certFilename = economyConfig.GetString("ClientCertFilename", m_certFilename);
@@ -540,32 +556,21 @@ namespace OpenSim.Modules.Currency
 
         public int GetBalance(UUID agentID)
         {
-            IClientAPI client = GetLocateClient(agentID);
-            return QueryBalanceFromMoneyServer(client);
+            return QueryBalance(agentID);
         }
 
 
         public bool UploadCovered(UUID agentID, int amount)
         {
-            IClientAPI client = GetLocateClient(agentID);
-
-            if (m_enable_server || string.IsNullOrEmpty(m_moneyServURL)) {
-                int balance = QueryBalanceFromMoneyServer(client);
-                if (balance>=amount) return true;
-            }
-            return false;
+            int balance = QueryBalance(agentID);
+            return balance >= amount;
         }
 
 
         public bool AmountCovered(UUID agentID, int amount)
         {
-            IClientAPI client = GetLocateClient(agentID);
-
-            if (m_enable_server || string.IsNullOrEmpty(m_moneyServURL)) {
-                int balance = QueryBalanceFromMoneyServer(client);
-                if (balance>=amount) return true;
-            }
-            return false;
+            int balance = QueryBalance(agentID);
+            return balance >= amount;
         }
 
 
@@ -725,7 +730,7 @@ namespace OpenSim.Modules.Currency
             
             IClientAPI senderClient = GetLocateClient(landBuyEvent.agentId);
             if (senderClient!=null) {
-                int balance = QueryBalanceFromMoneyServer(senderClient);
+                int balance = QueryBalance(landBuyEvent.agentId);
                 if (balance >= landBuyEvent.parcelPrice) {
                     lock(landBuyEvent) {
                         landBuyEvent.economyValidated = true;
@@ -772,7 +777,7 @@ namespace OpenSim.Modules.Currency
             if (remoteClient==null || salePrice<0) return;
 
             // Get the balance from money server.   
-            int balance = QueryBalanceFromMoneyServer(remoteClient);
+            int balance = QueryBalance(agentID);
             if (balance<salePrice) {
                 remoteClient.SendAgentAlertMessage("Unable to buy now. You don't have sufficient funds", false);
                 return;
@@ -827,7 +832,7 @@ namespace OpenSim.Modules.Currency
                 int balance = 0;
                 //
                 if (m_enable_server) {
-                    balance = QueryBalanceFromMoneyServer(client);
+                    balance = QueryBalance(agentID);
                 }
 
                 client.SendMoneyBalance(TransactionID, true, new byte[0], balance, 0, UUID.Zero, false, UUID.Zero, false, 0, String.Empty);
@@ -1052,7 +1057,7 @@ namespace OpenSim.Modules.Currency
                         string sessionid = (string)requestParam["clientSessionID"];
                         string secureid  = (string)requestParam["clientSecureSessionID"];
                         if (client!=null && secureid==client.SecureSessionId.ToString() && (sessionid==UUID.Zero.ToString()||sessionid==client.SessionId.ToString())) {
-                            balance = QueryBalanceFromMoneyServer(client);
+                            balance = QueryBalance(clientUUID);
                         }
                     }
                 }
@@ -1274,6 +1279,306 @@ namespace OpenSim.Modules.Currency
         #endregion
 
 
+        #region REST API Integration Methods
+
+        /// <summary>
+        /// Determine if a user is local (has a WordPress account)
+        /// </summary>
+        private bool IsLocalUser(UUID userID)
+        {
+            if (!m_useRestApi || string.IsNullOrEmpty(m_restBaseUrl))
+                return false;
+
+            try
+            {
+                using (var client = new WebClient())
+                {
+                    var url = $"{m_restBaseUrl}/wallet/{userID}?consumer_key={m_consumerKey}&consumer_secret={m_consumerSecret}";
+                    var response = client.DownloadString(url);
+                    return !string.IsNullOrEmpty(response) && !response.Contains("\"error\"");
+                }
+            }
+            catch (Exception ex)
+            {
+                m_log.WarnFormat("[MONEY MODULE]: IsLocalUser: Error checking local user {0}: {1}", userID, ex.Message);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Unified balance query method
+        /// </summary>
+        private int QueryBalance(UUID userUUID)
+        {
+            if (m_useRestApi && IsLocalUser(userUUID))
+            {
+                return QueryBalanceFromRestApi(userUUID);
+            }
+            else
+            {
+                // For Hypergrid users, use XML-RPC
+                IClientAPI client = GetLocateClient(userUUID);
+                return QueryBalanceFromMoneyServer(client);
+            }
+        }
+
+        /// <summary>
+        /// REST API balance query
+        /// </summary>
+        private int QueryBalanceFromRestApi(UUID userUUID)
+        {
+            try
+            {
+                using (var client = new WebClient())
+                {
+                    var url = $"{m_restBaseUrl}/wallet/{userUUID}?consumer_key={m_consumerKey}&consumer_secret={m_consumerSecret}";
+                    var response = client.DownloadString(url);
+                    
+                    // Simple JSON parsing - look for balance field
+                    if (response.Contains("\"balance\""))
+                    {
+                        int start = response.IndexOf("\"balance\":") + 9;
+                        int end = response.IndexOf(",", start);
+                        if (end == -1) end = response.IndexOf("}", start);
+                        if (end > start)
+                        {
+                            string balanceStr = response.Substring(start, end - start).Trim();
+                            if (int.TryParse(balanceStr, out int balance))
+                                return balance;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                m_log.ErrorFormat("[MONEY MODULE]: QueryBalanceFromRestApi: REST API exception getting balance: {0}", ex.Message);
+            }
+            
+            return 0;
+        }
+
+        /// <summary>
+        /// Enhanced TransferMoney method to handle all scenarios
+        /// </summary>
+        private bool TransferMoney(UUID sender, UUID receiver, int amount, int type, UUID objectID, 
+                                  ulong regionHandle, UUID regionUUID, string description)
+        {
+            bool senderIsLocal = m_useRestApi && IsLocalUser(sender);
+            bool receiverIsLocal = m_useRestApi && IsLocalUser(receiver);
+            
+            // Both users are local - use REST API exclusively
+            if (senderIsLocal && receiverIsLocal)
+            {
+                return TransferViaRestApi(sender, receiver, amount, description);
+            }
+            // Both users are Hypergrid - use XML-RPC exclusively
+            else if (!senderIsLocal && !receiverIsLocal)
+            {
+                return TransferViaXmlRpc(sender, receiver, amount, type, objectID, regionHandle, regionUUID, description);
+            }
+            // Mixed transaction (local ↔ Hypergrid)
+            else
+            {
+                return HandleMixedTransaction(sender, receiver, amount, type, objectID, regionHandle, regionUUID, description);
+            }
+        }
+
+        /// <summary>
+        /// Handle transactions between local and Hypergrid users
+        /// </summary>
+        private bool HandleMixedTransaction(UUID sender, UUID receiver, int amount, int type, UUID objectID, 
+                                           ulong regionHandle, UUID regionUUID, string description)
+        {
+            bool senderIsLocal = m_useRestApi && IsLocalUser(sender);
+            
+            // For mixed transactions, we need to use both systems
+            if (senderIsLocal)
+            {
+                // Debit local sender via REST API
+                if (!UpdateWalletViaRestApi(sender, -amount, "debit", 
+                    $"Transfer to Hypergrid user {receiver}: {description}"))
+                {
+                    return false;
+                }
+                
+                // Credit Hypergrid receiver via XML-RPC (force transfer since sender is local)
+                if (!TransferViaXmlRpc(UUID.Zero, receiver, amount, type, objectID, regionHandle, regionUUID, 
+                    $"Transfer from local user {sender}: {description}"))
+                {
+                    // Rollback the debit if credit fails
+                    UpdateWalletViaRestApi(sender, amount, "credit", 
+                        $"Rollback failed transfer to {receiver}");
+                    return false;
+                }
+            }
+            else
+            {
+                // Debit Hypergrid sender via XML-RPC
+                if (!TransferViaXmlRpc(sender, UUID.Zero, amount, type, objectID, regionHandle, regionUUID, 
+                    $"Transfer to local user {receiver}: {description}"))
+                {
+                    return false;
+                }
+                
+                // Credit local receiver via REST API
+                if (!UpdateWalletViaRestApi(receiver, amount, "credit", 
+                    $"Transfer from Hypergrid user {sender}: {description}"))
+                {
+                    // Rollback the debit if credit fails
+                    TransferViaXmlRpc(UUID.Zero, sender, amount, type, objectID, regionHandle, regionUUID, 
+                        $"Rollback failed transfer to {receiver}");
+                    return false;
+                }
+            }
+            
+            return true;
+        }
+
+        /// <summary>
+        /// REST API wallet update
+        /// </summary>
+        private bool UpdateWalletViaRestApi(UUID userUUID, int amount, string action, string description)
+        {
+            try
+            {
+                using (var client = new WebClient())
+                {
+                    client.Headers[HttpRequestHeader.ContentType] = "application/json";
+                    
+                    var data = new
+                    {
+                        consumer_key = m_consumerKey,
+                        consumer_secret = m_consumerSecret,
+                        amount = Math.Abs(amount),
+                        action = action,
+                        transaction_detail = description,
+                        payment_method = "opensim",
+                        note = $"OpenSim transaction {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}"
+                    };
+                    
+                    string json = SimpleJsonSerialize(data);
+                    var response = client.UploadString($"{m_restBaseUrl}/wallet/{userUUID}", "PUT", json);
+                    
+                    // Check for success in response
+                    return response.Contains("\"success\":true") || response.Contains("\"status\":\"success\"");
+                }
+            }
+            catch (Exception ex)
+            {
+                m_log.ErrorFormat("[MONEY MODULE]: UpdateWalletViaRestApi: REST API exception updating wallet: {0}", ex.Message);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Simple JSON serialization for basic objects
+        /// </summary>
+        private string SimpleJsonSerialize(object obj)
+        {
+            var props = obj.GetType().GetProperties();
+            var pairs = new List<string>();
+            
+            foreach (var prop in props)
+            {
+                var value = prop.GetValue(obj, null);
+                string valueStr = value is string ? $"\"{value}\"" : value.ToString().ToLower();
+                pairs.Add($"\"{prop.Name}\":{valueStr}");
+            }
+            
+            return "{" + string.Join(",", pairs) + "}";
+        }
+
+        /// <summary>
+        /// REST API transfer between local users
+        /// </summary>
+        private bool TransferViaRestApi(UUID fromUUID, UUID toUUID, int amount, string description)
+        {
+            // Debit from sender
+            if (!UpdateWalletViaRestApi(fromUUID, -amount, "debit", 
+                $"Transfer to {toUUID}: {description}"))
+            {
+                return false;
+            }
+
+            // Credit to receiver
+            if (!UpdateWalletViaRestApi(toUUID, amount, "credit", 
+                $"Transfer from {fromUUID}: {description}"))
+            {
+                // Rollback if credit fails
+                UpdateWalletViaRestApi(fromUUID, amount, "credit", 
+                    $"Rollback failed transfer to {toUUID}");
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// XML-RPC transfer (for Hypergrid users) - uses existing XML-RPC infrastructure
+        /// </summary>
+        private bool TransferViaXmlRpc(UUID sender, UUID receiver, int amount, int type, UUID objectID, 
+                                      ulong regionHandle, UUID regionUUID, string description)
+        {
+            bool ret = false;
+            IClientAPI senderClient = GetLocateClient(sender);
+
+            if (senderClient == null && sender != UUID.Zero)
+            {
+                m_log.InfoFormat("[MONEY MODULE]: TransferViaXmlRpc: Client {0} not found", sender.ToString());
+                return false;
+            }
+
+            if (sender != UUID.Zero && QueryBalanceFromMoneyServer(senderClient) < amount)
+            {
+                m_log.InfoFormat("[MONEY MODULE]: TransferViaXmlRpc: Insufficient balance in client [{0}]", sender.ToString());
+                return false;
+            }
+
+            if (m_enable_server)
+            {
+                string objName = string.Empty;
+                SceneObjectPart sceneObj = GetLocatePrim(objectID);
+                if (sceneObj != null) objName = sceneObj.Name;
+  
+                Hashtable paramTable = new Hashtable();
+                paramTable["senderID"] = sender.ToString();
+                paramTable["receiverID"] = receiver.ToString();
+                
+                if (sender != UUID.Zero)
+                {
+                    paramTable["senderSessionID"] = senderClient.SessionId.ToString();
+                    paramTable["senderSecureSessionID"] = senderClient.SecureSessionId.ToString();
+                }
+                
+                paramTable["transactionType"] = type;
+                paramTable["objectID"] = objectID.ToString();
+                paramTable["objectName"] = objName;
+                paramTable["regionHandle"] = regionHandle.ToString();
+                paramTable["regionUUID"] = regionUUID.ToString();
+                paramTable["amount"] = amount;
+                paramTable["description"] = description;
+
+                // Use force transfer for system-initiated transactions (mixed transactions)
+                string method = (sender == UUID.Zero) ? "ForceTransferMoney" : "TransferMoney";
+                Hashtable resultTable = genericCurrencyXMLRPCRequest(paramTable, method);
+
+                if (resultTable != null && resultTable.Contains("success"))
+                {
+                    ret = (bool)resultTable["success"];
+                }
+                else
+                {
+                    m_log.ErrorFormat("[MONEY MODULE]: TransferViaXmlRpc: Cannot process money transfer from [{0}] to [{1}]", 
+                        sender.ToString(), receiver.ToString());
+                }
+            }
+
+            return ret;
+        }
+
+        #endregion
+
+
         #region MoneyModule private help functions
 
         /// <summary>   
@@ -1285,62 +1590,10 @@ namespace OpenSim.Modules.Currency
         /// <returns>   
         /// return true, if successfully.   
         /// </returns>   
-        private bool TransferMoney(UUID sender, UUID receiver, int amount, int type, UUID objectID, ulong regionHandle, UUID regionUUID, string description)
+        private bool TransferMoney_Original(UUID sender, UUID receiver, int amount, int type, UUID objectID, ulong regionHandle, UUID regionUUID, string description)
         {
-            //m_log.InfoFormat("[MONEY MODULE]: TransferMoney:");
-
-            bool ret = false;
-            IClientAPI senderClient = GetLocateClient(sender);
-
-            // Handle the illegal transaction.   
-            // receiverClient could be null.
-            if (senderClient==null) {
-                m_log.InfoFormat("[MONEY MODULE]: TransferMoney: Client {0} not found", sender.ToString());
-                return false;
-            }
-
-            if (QueryBalanceFromMoneyServer(senderClient)<amount) {
-                m_log.InfoFormat("[MONEY MODULE]: TransferMoney: No insufficient balance in client [{0}]", sender.ToString());
-                return false;
-            }
-
-            #region Send transaction request to money server and parse the resultes.
-
-            if (m_enable_server) {
-                string objName = string.Empty;
-                SceneObjectPart sceneObj = GetLocatePrim(objectID);
-                if (sceneObj!=null)objName = sceneObj.Name;
-  
-                // Fill parameters for money transfer XML-RPC.   
-                Hashtable paramTable = new Hashtable();
-                paramTable["senderID"]              = sender.ToString();
-                paramTable["receiverID"]            = receiver.ToString();
-                paramTable["senderSessionID"]       = senderClient.SessionId.ToString();
-                paramTable["senderSecureSessionID"] = senderClient.SecureSessionId.ToString();
-                paramTable["transactionType"]       = type;
-                paramTable["objectID"]              = objectID.ToString();
-                paramTable["objectName"]            = objName;
-                paramTable["regionHandle"]          = regionHandle.ToString();
-                paramTable["regionUUID"]            = regionUUID.ToString();
-                paramTable["amount"]                = amount;
-                paramTable["description"]           = description;
-
-                // Generate the request for transfer.   
-                Hashtable resultTable = genericCurrencyXMLRPCRequest(paramTable, "TransferMoney");
-
-                // Handle the return values from Money Server.  
-                if (resultTable!=null && resultTable.Contains("success")) {
-                    if ((bool)resultTable["success"]==true) {
-                        ret = true;
-                    }
-                }
-                else m_log.ErrorFormat("[MONEY MODULE]: TransferMoney: Can not money transfer request from [{0}] to [{1}]", sender.ToString(), receiver.ToString());
-            }
-            //else m_log.ErrorFormat("[MONEY MODULE]: TransferMoney: Money Server is not available!!");
-
-            #endregion
-
-            return ret;
+            // This method is kept for backward compatibility but is superseded by the new TransferMoney method
+            return TransferMoney(sender, receiver, amount, type, objectID, regionHandle, regionUUID, description);
         }
 
 
@@ -1601,7 +1854,7 @@ namespace OpenSim.Modules.Currency
                 return false;
             }
 
-            if (QueryBalanceFromMoneyServer(senderClient)<amount) {
+            if (QueryBalance(sender)<amount) {
                 m_log.InfoFormat("[MONEY MODULE]: PayMoneyCharge: No insufficient balance in client [{0}]", sender.ToString());
                 return false;
             }
