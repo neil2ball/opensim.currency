@@ -45,4 +45,6 @@
 	RedirectUrl = https://eudaimon.me/microtokens/
 	RedirectMessage = Please visit our website to purchase currency
 
+	;; Disable XML-RPC entirely, use only REST API for local avatars
+    DisableXmlRpc = true
 

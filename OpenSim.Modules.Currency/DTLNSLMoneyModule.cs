@@ -176,7 +176,6 @@ namespace OpenSim.Modules.Currency
     }
 */
 
-
      
     [Extension(Path = "/OpenSim/RegionModules", NodeName = "RegionModule", Id = "DTLNSLMoneyModule")]
     public class DTLNSLMoneyModule : IMoneyModule, ISharedRegionModule
@@ -223,6 +222,9 @@ namespace OpenSim.Modules.Currency
         private string m_consumerKey = string.Empty;
         private string m_consumerSecret = string.Empty;
         private bool m_useRestApi = false;
+
+        // XML-RPC disable configuration
+        private bool m_disableXmlRpc = false;
 
         /// <summary>   
         /// Scene dictionary indexed by Region Handle   
@@ -304,6 +306,10 @@ namespace OpenSim.Modules.Currency
                 m_restBaseUrl = economyConfig.GetString("RestBaseUrl", m_restBaseUrl);
                 m_consumerKey = economyConfig.GetString("ConsumerKey", m_consumerKey);
                 m_consumerSecret = economyConfig.GetString("ConsumerSecret", m_consumerSecret);
+
+                // XML-RPC disable configuration
+                m_disableXmlRpc = economyConfig.GetBoolean("DisableXmlRpc", m_disableXmlRpc);
+                m_log.InfoFormat("[MONEY MODULE]: XML-RPC disabled: {0}", m_disableXmlRpc);
 
                 m_log.InfoFormat("[MONEY MODULE]: REST API enabled: {0}, Base URL: {1}", m_useRestApi, m_restBaseUrl);
 
@@ -393,7 +399,8 @@ namespace OpenSim.Modules.Currency
 
             lock (m_sceneList) {
                 if (m_sceneList.Count==0) {
-                    if (m_enable_server) {
+                    // Only enable XML-RPC if not disabled
+                    if (m_enable_server && !m_disableXmlRpc) {
                         HttpServer = new BaseHttpServer(9000);
                         HttpServer.AddStreamHandler(new Region.Framework.Scenes.RegionStatsHandler(scene.RegionInfo));
 
@@ -412,6 +419,10 @@ namespace OpenSim.Modules.Currency
                         MainServer.Instance.AddXmlRPCHandler("AddBankerMoney", AddBankerMoneyHandler);      // added
                         MainServer.Instance.AddXmlRPCHandler("SendMoney", SendMoneyHandler);                // added
                         MainServer.Instance.AddXmlRPCHandler("MoveMoney", MoveMoneyHandler);                // added
+                    }
+                    else if (m_disableXmlRpc)
+                    {
+                        m_log.InfoFormat("[MONEY MODULE]: XML-RPC handlers disabled - using REST API only for local avatars");
                     }
                 }
 
@@ -885,6 +896,19 @@ namespace OpenSim.Modules.Currency
         // "OnMoneyTransfered" RPC from MoneyServer
         public XmlRpcResponse OnMoneyTransferedHandler(XmlRpcRequest request, IPEndPoint remoteClient)
         {
+            if (m_disableXmlRpc)
+            {
+                m_log.WarnFormat("[MONEY MODULE]: OnMoneyTransferedHandler blocked - XML-RPC disabled");
+                
+                XmlRpcResponse resp = new XmlRpcResponse();
+                Hashtable paramTable = new Hashtable();
+                paramTable["success"] = false;
+                paramTable["error"] = "XML-RPC transactions are disabled. Please use the REST API for local currency transactions.";
+                paramTable["error_code"] = "XML_RPC_DISABLED";
+                resp.Value = paramTable;
+                return resp;
+            }
+
             m_log.InfoFormat("[MONEY MODULE]: OnMoneyTransferedHandler:");
 
             bool ret = false;
@@ -937,6 +961,19 @@ namespace OpenSim.Modules.Currency
         // "UpdateBalance" RPC from MoneyServer or Script
         public XmlRpcResponse BalanceUpdateHandler(XmlRpcRequest request, IPEndPoint remoteClient)
         {
+            if (m_disableXmlRpc)
+            {
+                m_log.WarnFormat("[MONEY MODULE]: BalanceUpdateHandler blocked - XML-RPC disabled");
+                
+                XmlRpcResponse resp = new XmlRpcResponse();
+                Hashtable paramTable = new Hashtable();
+                paramTable["success"] = false;
+                paramTable["error"] = "XML-RPC transactions are disabled. Please use the REST API for local currency transactions.";
+                paramTable["error_code"] = "XML_RPC_DISABLED";
+                resp.Value = paramTable;
+                return resp;
+            }
+
             //m_log.InfoFormat("[MONEY MODULE]: BalanceUpdateHandler:");
 
             bool ret = false;
@@ -994,6 +1031,19 @@ namespace OpenSim.Modules.Currency
         // "UserAlert" RPC from Script
         public XmlRpcResponse UserAlertHandler(XmlRpcRequest request, IPEndPoint remoteClient)
         {
+            if (m_disableXmlRpc)
+            {
+                m_log.WarnFormat("[MONEY MODULE]: UserAlertHandler blocked - XML-RPC disabled");
+                
+                XmlRpcResponse resp = new XmlRpcResponse();
+                Hashtable paramTable = new Hashtable();
+                paramTable["success"] = false;
+                paramTable["error"] = "XML-RPC transactions are disabled. Please use the REST API for local currency transactions.";
+                paramTable["error_code"] = "XML_RPC_DISABLED";
+                resp.Value = paramTable;
+                return resp;
+            }
+
             //m_log.InfoFormat("[MONEY MODULE]: UserAlertHandler:");
 
             bool ret = false;
@@ -1040,6 +1090,19 @@ namespace OpenSim.Modules.Currency
         // "GetBalance" RPC from Script
         public XmlRpcResponse GetBalanceHandler(XmlRpcRequest request, IPEndPoint remoteClient)
         {
+            if (m_disableXmlRpc)
+            {
+                m_log.WarnFormat("[MONEY MODULE]: GetBalanceHandler blocked - XML-RPC disabled");
+                
+                XmlRpcResponse resp = new XmlRpcResponse();
+                Hashtable paramTable = new Hashtable();
+                paramTable["success"] = false;
+                paramTable["error"] = "XML-RPC transactions are disabled. Please use the REST API for local currency transactions.";
+                paramTable["error_code"] = "XML_RPC_DISABLED";
+                resp.Value = paramTable;
+                return resp;
+            }
+
             //m_log.InfoFormat("[MONEY MODULE]: GetBalanceHandler:");
 
             bool ret = false;
@@ -1082,6 +1145,19 @@ namespace OpenSim.Modules.Currency
         // "AddBankerMoney" RPC from Script
         public XmlRpcResponse AddBankerMoneyHandler(XmlRpcRequest request, IPEndPoint remoteClient)
         {
+            if (m_disableXmlRpc)
+            {
+                m_log.WarnFormat("[MONEY MODULE]: AddBankerMoneyHandler blocked - XML-RPC disabled");
+                
+                XmlRpcResponse resp = new XmlRpcResponse();
+                Hashtable paramTable = new Hashtable();
+                paramTable["success"] = false;
+                paramTable["error"] = "XML-RPC transactions are disabled. Please use the REST API for local currency transactions.";
+                paramTable["error_code"] = "XML_RPC_DISABLED";
+                resp.Value = paramTable;
+                return resp;
+            }
+
             //m_log.InfoFormat("[MONEY MODULE]: AddBankerMoneyHandler:");
 
             if (m_redirectEnabled)
@@ -1165,6 +1241,19 @@ namespace OpenSim.Modules.Currency
         // "SendMoney" RPC from Script
         public XmlRpcResponse SendMoneyHandler(XmlRpcRequest request, IPEndPoint remoteClient)
         {
+            if (m_disableXmlRpc)
+            {
+                m_log.WarnFormat("[MONEY MODULE]: SendMoneyHandler blocked - XML-RPC disabled");
+                
+                XmlRpcResponse resp = new XmlRpcResponse();
+                Hashtable paramTable = new Hashtable();
+                paramTable["success"] = false;
+                paramTable["error"] = "XML-RPC transactions are disabled. Please use the REST API for local currency transactions.";
+                paramTable["error_code"] = "XML_RPC_DISABLED";
+                resp.Value = paramTable;
+                return resp;
+            }
+
             //m_log.InfoFormat("[MONEY MODULE]: SendMoneyHandler:");
 
             bool ret = false;
@@ -1223,6 +1312,19 @@ namespace OpenSim.Modules.Currency
         // "MoveMoney" RPC from Script
         public XmlRpcResponse MoveMoneyHandler(XmlRpcRequest request, IPEndPoint remoteClient)
         {
+            if (m_disableXmlRpc)
+            {
+                m_log.WarnFormat("[MONEY MODULE]: MoveMoneyHandler blocked - XML-RPC disabled");
+                
+                XmlRpcResponse resp = new XmlRpcResponse();
+                Hashtable paramTable = new Hashtable();
+                paramTable["success"] = false;
+                paramTable["error"] = "XML-RPC transactions are disabled. Please use the REST API for local currency transactions.";
+                paramTable["error_code"] = "XML_RPC_DISABLED";
+                resp.Value = paramTable;
+                return resp;
+            }
+
             //m_log.InfoFormat("[MONEY MODULE]: MoveMoneyHandler:");
 
             bool ret = false;
@@ -1310,13 +1412,27 @@ namespace OpenSim.Modules.Currency
         /// </summary>
         private int QueryBalance(UUID userUUID)
         {
+            if (m_disableXmlRpc)
+            {
+                // When XML-RPC is disabled, only local users can check balance
+                if (m_useRestApi && IsLocalUser(userUUID))
+                {
+                    return QueryBalanceFromRestApi(userUUID);
+                }
+                else
+                {
+                    m_log.WarnFormat("[MONEY MODULE]: Balance query for Hypergrid avatar {0} blocked - XML-RPC disabled", userUUID);
+                    return 0; // Return 0 for Hypergrid avatars when XML-RPC is disabled
+                }
+            }
+            
             if (m_useRestApi && IsLocalUser(userUUID))
             {
                 return QueryBalanceFromRestApi(userUUID);
             }
             else
             {
-                // For Hypergrid users, use XML-RPC
+                // For Hypergrid users, use XML-RPC (if not disabled)
                 IClientAPI client = GetLocateClient(userUUID);
                 return QueryBalanceFromMoneyServer(client);
             }
@@ -1363,6 +1479,27 @@ namespace OpenSim.Modules.Currency
         private bool TransferMoney(UUID sender, UUID receiver, int amount, int type, UUID objectID, 
                                   ulong regionHandle, UUID regionUUID, string description)
         {
+            if (m_disableXmlRpc)
+            {
+                // When XML-RPC is disabled, only allow transactions between local users
+                bool senderIsLocal = m_useRestApi && IsLocalUser(sender);
+                bool receiverIsLocal = m_useRestApi && IsLocalUser(receiver);
+                
+                if (!senderIsLocal || !receiverIsLocal)
+                {
+                    m_log.WarnFormat("[MONEY MODULE]: Transaction blocked - XML-RPC disabled and one or more users are Hypergrid avatars. Sender: {0}, Receiver: {1}", 
+                                    sender, receiver);
+                    
+                    // Notify users about the restriction
+                    NotifyHypergridTransactionBlocked(sender, receiver, amount, description);
+                    return false;
+                }
+                
+                // Both users are local - use REST API
+                return TransferViaRestApi(sender, receiver, amount, description);
+            }
+            
+            // Original logic when XML-RPC is enabled
             bool senderIsLocal = m_useRestApi && IsLocalUser(sender);
             bool receiverIsLocal = m_useRestApi && IsLocalUser(receiver);
             
@@ -1574,6 +1711,42 @@ namespace OpenSim.Modules.Currency
             }
 
             return ret;
+        }
+
+        #endregion
+
+
+        #region Helper methods for XML-RPC disable functionality
+
+        /// <summary>
+        /// Notify users about blocked Hypergrid transactions when XML-RPC is disabled
+        /// </summary>
+        private void NotifyHypergridTransactionBlocked(UUID sender, UUID receiver, int amount, string description)
+        {
+            string message = "Currency transactions are currently disabled for Hypergrid avatars. Please use local currency for transactions.";
+            
+            try
+            {
+                // Notify sender
+                IClientAPI senderClient = GetLocateClient(sender);
+                if (senderClient != null)
+                {
+                    senderClient.SendAlertMessage(message);
+                }
+                
+                // Notify receiver if they're online
+                IClientAPI receiverClient = GetLocateClient(receiver);
+                if (receiverClient != null)
+                {
+                    receiverClient.SendAlertMessage(message);
+                }
+                
+                m_log.InfoFormat("[MONEY MODULE]: Notified users about blocked Hypergrid transaction");
+            }
+            catch (Exception ex)
+            {
+                m_log.WarnFormat("[MONEY MODULE]: Error notifying users about blocked transaction: {0}", ex.Message);
+            }
         }
 
         #endregion
@@ -1948,6 +2121,23 @@ namespace OpenSim.Modules.Currency
             bool isNpc = avatar.IsNPC;
 
             IClientAPI client = avatar.ControllingClient;
+
+            if (m_disableXmlRpc)
+            {
+                m_log.InfoFormat("[MONEY MODULE]: XML-RPC disabled - skipping money server login for avatar {0}", avatar.UUID);
+                
+                // For local users, use REST API to get balance
+                if (m_useRestApi && IsLocalUser(avatar.UUID))
+                {
+                    balance = QueryBalanceFromRestApi(avatar.UUID);
+                    return true;
+                }
+                else
+                {
+                    m_log.WarnFormat("[MONEY MODULE]: Hypergrid avatar {0} cannot login - XML-RPC disabled", avatar.UUID);
+                    return false;
+                }
+            }
 
             #region Send money server the client info for login.
 
