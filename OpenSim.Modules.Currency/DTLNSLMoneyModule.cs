@@ -32,6 +32,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Reflection;
 using System.Net;
+using System.Net.Http;
 using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -187,6 +188,9 @@ namespace OpenSim.Modules.Currency
 
         // Private data members.   
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
+
+        // HttpClient for REST API calls
+        private static readonly HttpClient httpClient = new HttpClient();
 
         //private bool  m_enabled = true;
         private bool  m_sellEnabled   = false;
@@ -900,13 +904,13 @@ namespace OpenSim.Modules.Currency
             {
                 m_log.WarnFormat("[MONEY MODULE]: OnMoneyTransferedHandler blocked - XML-RPC disabled");
                 
-                XmlRpcResponse resp = new XmlRpcResponse();
-                Hashtable paramTable = new Hashtable();
-                paramTable["success"] = false;
-                paramTable["error"] = "XML-RPC transactions are disabled. Please use the REST API for local currency transactions.";
-                paramTable["error_code"] = "XML_RPC_DISABLED";
-                resp.Value = paramTable;
-                return resp;
+                XmlRpcResponse disabledResp = new XmlRpcResponse();
+                Hashtable disabledParamTable = new Hashtable();
+                disabledParamTable["success"] = false;
+                disabledParamTable["error"] = "XML-RPC transactions are disabled. Please use the REST API for local currency transactions.";
+                disabledParamTable["error_code"] = "XML_RPC_DISABLED";
+                disabledResp.Value = disabledParamTable;
+                return disabledResp;
             }
 
             m_log.InfoFormat("[MONEY MODULE]: OnMoneyTransferedHandler:");
@@ -965,13 +969,13 @@ namespace OpenSim.Modules.Currency
             {
                 m_log.WarnFormat("[MONEY MODULE]: BalanceUpdateHandler blocked - XML-RPC disabled");
                 
-                XmlRpcResponse resp = new XmlRpcResponse();
-                Hashtable paramTable = new Hashtable();
-                paramTable["success"] = false;
-                paramTable["error"] = "XML-RPC transactions are disabled. Please use the REST API for local currency transactions.";
-                paramTable["error_code"] = "XML_RPC_DISABLED";
-                resp.Value = paramTable;
-                return resp;
+                XmlRpcResponse disabledResp = new XmlRpcResponse();
+                Hashtable disabledParamTable = new Hashtable();
+                disabledParamTable["success"] = false;
+                disabledParamTable["error"] = "XML-RPC transactions are disabled. Please use the REST API for local currency transactions.";
+                disabledParamTable["error_code"] = "XML_RPC_DISABLED";
+                disabledResp.Value = disabledParamTable;
+                return disabledResp;
             }
 
             //m_log.InfoFormat("[MONEY MODULE]: BalanceUpdateHandler:");
@@ -1035,13 +1039,13 @@ namespace OpenSim.Modules.Currency
             {
                 m_log.WarnFormat("[MONEY MODULE]: UserAlertHandler blocked - XML-RPC disabled");
                 
-                XmlRpcResponse resp = new XmlRpcResponse();
-                Hashtable paramTable = new Hashtable();
-                paramTable["success"] = false;
-                paramTable["error"] = "XML-RPC transactions are disabled. Please use the REST API for local currency transactions.";
-                paramTable["error_code"] = "XML_RPC_DISABLED";
-                resp.Value = paramTable;
-                return resp;
+                XmlRpcResponse disabledResp = new XmlRpcResponse();
+                Hashtable disabledParamTable = new Hashtable();
+                disabledParamTable["success"] = false;
+                disabledParamTable["error"] = "XML-RPC transactions are disabled. Please use the REST API for local currency transactions.";
+                disabledParamTable["error_code"] = "XML_RPC_DISABLED";
+                disabledResp.Value = disabledParamTable;
+                return disabledResp;
             }
 
             //m_log.InfoFormat("[MONEY MODULE]: UserAlertHandler:");
@@ -1094,13 +1098,13 @@ namespace OpenSim.Modules.Currency
             {
                 m_log.WarnFormat("[MONEY MODULE]: GetBalanceHandler blocked - XML-RPC disabled");
                 
-                XmlRpcResponse resp = new XmlRpcResponse();
-                Hashtable paramTable = new Hashtable();
-                paramTable["success"] = false;
-                paramTable["error"] = "XML-RPC transactions are disabled. Please use the REST API for local currency transactions.";
-                paramTable["error_code"] = "XML_RPC_DISABLED";
-                resp.Value = paramTable;
-                return resp;
+                XmlRpcResponse disabledResp = new XmlRpcResponse();
+                Hashtable disabledParamTable = new Hashtable();
+                disabledParamTable["success"] = false;
+                disabledParamTable["error"] = "XML-RPC transactions are disabled. Please use the REST API for local currency transactions.";
+                disabledParamTable["error_code"] = "XML_RPC_DISABLED";
+                disabledResp.Value = disabledParamTable;
+                return disabledResp;
             }
 
             //m_log.InfoFormat("[MONEY MODULE]: GetBalanceHandler:");
@@ -1149,13 +1153,13 @@ namespace OpenSim.Modules.Currency
             {
                 m_log.WarnFormat("[MONEY MODULE]: AddBankerMoneyHandler blocked - XML-RPC disabled");
                 
-                XmlRpcResponse resp = new XmlRpcResponse();
-                Hashtable paramTable = new Hashtable();
-                paramTable["success"] = false;
-                paramTable["error"] = "XML-RPC transactions are disabled. Please use the REST API for local currency transactions.";
-                paramTable["error_code"] = "XML_RPC_DISABLED";
-                resp.Value = paramTable;
-                return resp;
+                XmlRpcResponse disabledResp = new XmlRpcResponse();
+                Hashtable disabledParamTable = new Hashtable();
+                disabledParamTable["success"] = false;
+                disabledParamTable["error"] = "XML-RPC transactions are disabled. Please use the REST API for local currency transactions.";
+                disabledParamTable["error_code"] = "XML_RPC_DISABLED";
+                disabledResp.Value = disabledParamTable;
+                return disabledResp;
             }
 
             //m_log.InfoFormat("[MONEY MODULE]: AddBankerMoneyHandler:");
@@ -1175,16 +1179,17 @@ namespace OpenSim.Modules.Currency
                 // Notify the user in-world about the redirect
                 NotifyUserAboutRedirect(userID, amount);
                 
-                XmlRpcResponse resp = new XmlRpcResponse();
-                Hashtable paramTable = new Hashtable();
-                paramTable["success"] = false;
-                paramTable["redirect"] = true;
-                paramTable["message"] = m_redirectMessage;
-                paramTable["url"] = m_redirectUrl;
-                paramTable["settle"] = false;
+                // Use different variable names to avoid conflict
+                XmlRpcResponse redirectResponse = new XmlRpcResponse();
+                Hashtable redirectParamTable = new Hashtable();
+                redirectParamTable["success"] = false;
+                redirectParamTable["redirect"] = true;
+                redirectParamTable["message"] = m_redirectMessage;
+                redirectParamTable["url"] = m_redirectUrl;
+                redirectParamTable["settle"] = false;
                 
-                resp.Value = paramTable;
-                return resp;
+                redirectResponse.Value = redirectParamTable;
+                return redirectResponse;
             }
 
             bool ret = false;
@@ -1245,13 +1250,13 @@ namespace OpenSim.Modules.Currency
             {
                 m_log.WarnFormat("[MONEY MODULE]: SendMoneyHandler blocked - XML-RPC disabled");
                 
-                XmlRpcResponse resp = new XmlRpcResponse();
-                Hashtable paramTable = new Hashtable();
-                paramTable["success"] = false;
-                paramTable["error"] = "XML-RPC transactions are disabled. Please use the REST API for local currency transactions.";
-                paramTable["error_code"] = "XML_RPC_DISABLED";
-                resp.Value = paramTable;
-                return resp;
+                XmlRpcResponse disabledResp = new XmlRpcResponse();
+                Hashtable disabledParamTable = new Hashtable();
+                disabledParamTable["success"] = false;
+                disabledParamTable["error"] = "XML-RPC transactions are disabled. Please use the REST API for local currency transactions.";
+                disabledParamTable["error_code"] = "XML_RPC_DISABLED";
+                disabledResp.Value = disabledParamTable;
+                return disabledResp;
             }
 
             //m_log.InfoFormat("[MONEY MODULE]: SendMoneyHandler:");
@@ -1316,13 +1321,13 @@ namespace OpenSim.Modules.Currency
             {
                 m_log.WarnFormat("[MONEY MODULE]: MoveMoneyHandler blocked - XML-RPC disabled");
                 
-                XmlRpcResponse resp = new XmlRpcResponse();
-                Hashtable paramTable = new Hashtable();
-                paramTable["success"] = false;
-                paramTable["error"] = "XML-RPC transactions are disabled. Please use the REST API for local currency transactions.";
-                paramTable["error_code"] = "XML_RPC_DISABLED";
-                resp.Value = paramTable;
-                return resp;
+                XmlRpcResponse disabledResp = new XmlRpcResponse();
+                Hashtable disabledParamTable = new Hashtable();
+                disabledParamTable["success"] = false;
+                disabledParamTable["error"] = "XML-RPC transactions are disabled. Please use the REST API for local currency transactions.";
+                disabledParamTable["error_code"] = "XML_RPC_DISABLED";
+                disabledResp.Value = disabledParamTable;
+                return disabledResp;
             }
 
             //m_log.InfoFormat("[MONEY MODULE]: MoveMoneyHandler:");
@@ -1393,12 +1398,9 @@ namespace OpenSim.Modules.Currency
 
             try
             {
-                using (var client = new WebClient())
-                {
-                    var url = $"{m_restBaseUrl}/wallet/{userID}?consumer_key={m_consumerKey}&consumer_secret={m_consumerSecret}";
-                    var response = client.DownloadString(url);
-                    return !string.IsNullOrEmpty(response) && !response.Contains("\"error\"");
-                }
+                var url = $"{m_restBaseUrl}/wallet/{userID}?consumer_key={m_consumerKey}&consumer_secret={m_consumerSecret}";
+                var response = httpClient.GetStringAsync(url).Result;
+                return !string.IsNullOrEmpty(response) && !response.Contains("\"error\"");
             }
             catch (Exception ex)
             {
@@ -1445,23 +1447,20 @@ namespace OpenSim.Modules.Currency
         {
             try
             {
-                using (var client = new WebClient())
+                var url = $"{m_restBaseUrl}/wallet/{userUUID}?consumer_key={m_consumerKey}&consumer_secret={m_consumerSecret}";
+                var response = httpClient.GetStringAsync(url).Result;
+                
+                // Simple JSON parsing - look for balance field
+                if (response.Contains("\"balance\""))
                 {
-                    var url = $"{m_restBaseUrl}/wallet/{userUUID}?consumer_key={m_consumerKey}&consumer_secret={m_consumerSecret}";
-                    var response = client.DownloadString(url);
-                    
-                    // Simple JSON parsing - look for balance field
-                    if (response.Contains("\"balance\""))
+                    int start = response.IndexOf("\"balance\":") + 9;
+                    int end = response.IndexOf(",", start);
+                    if (end == -1) end = response.IndexOf("}", start);
+                    if (end > start)
                     {
-                        int start = response.IndexOf("\"balance\":") + 9;
-                        int end = response.IndexOf(",", start);
-                        if (end == -1) end = response.IndexOf("}", start);
-                        if (end > start)
-                        {
-                            string balanceStr = response.Substring(start, end - start).Trim();
-                            if (int.TryParse(balanceStr, out int balance))
-                                return balance;
-                        }
+                        string balanceStr = response.Substring(start, end - start).Trim();
+                        if (int.TryParse(balanceStr, out int balance))
+                            return balance;
                     }
                 }
             }
@@ -1479,13 +1478,13 @@ namespace OpenSim.Modules.Currency
         private bool TransferMoney(UUID sender, UUID receiver, int amount, int type, UUID objectID, 
                                   ulong regionHandle, UUID regionUUID, string description)
         {
+            bool isSenderLocal = m_useRestApi && IsLocalUser(sender);
+            bool isReceiverLocal = m_useRestApi && IsLocalUser(receiver);
+
             if (m_disableXmlRpc)
             {
                 // When XML-RPC is disabled, only allow transactions between local users
-                bool senderIsLocal = m_useRestApi && IsLocalUser(sender);
-                bool receiverIsLocal = m_useRestApi && IsLocalUser(receiver);
-                
-                if (!senderIsLocal || !receiverIsLocal)
+                if (!isSenderLocal || !isReceiverLocal)
                 {
                     m_log.WarnFormat("[MONEY MODULE]: Transaction blocked - XML-RPC disabled and one or more users are Hypergrid avatars. Sender: {0}, Receiver: {1}", 
                                     sender, receiver);
@@ -1500,16 +1499,13 @@ namespace OpenSim.Modules.Currency
             }
             
             // Original logic when XML-RPC is enabled
-            bool senderIsLocal = m_useRestApi && IsLocalUser(sender);
-            bool receiverIsLocal = m_useRestApi && IsLocalUser(receiver);
-            
             // Both users are local - use REST API exclusively
-            if (senderIsLocal && receiverIsLocal)
+            if (isSenderLocal && isReceiverLocal)
             {
                 return TransferViaRestApi(sender, receiver, amount, description);
             }
             // Both users are Hypergrid - use XML-RPC exclusively
-            else if (!senderIsLocal && !receiverIsLocal)
+            else if (!isSenderLocal && !isReceiverLocal)
             {
                 return TransferViaXmlRpc(sender, receiver, amount, type, objectID, regionHandle, regionUUID, description);
             }
@@ -1526,10 +1522,17 @@ namespace OpenSim.Modules.Currency
         private bool HandleMixedTransaction(UUID sender, UUID receiver, int amount, int type, UUID objectID, 
                                            ulong regionHandle, UUID regionUUID, string description)
         {
-            bool senderIsLocal = m_useRestApi && IsLocalUser(sender);
+            // Remove the redeclaration of these variables since they're already in the parent scope
+            // bool isSenderLocal = m_useRestApi && IsLocalUser(sender);
+            // bool isReceiverLocal = m_useRestApi && IsLocalUser(receiver);
             
+            // These variables are already defined in the parent TransferMoney method
+            // Just use them directly
+            bool isSenderLocal = m_useRestApi && IsLocalUser(sender);
+            bool isReceiverLocal = m_useRestApi && IsLocalUser(receiver);
+
             // For mixed transactions, we need to use both systems
-            if (senderIsLocal)
+            if (isSenderLocal)
             {
                 // Debit local sender via REST API
                 if (!UpdateWalletViaRestApi(sender, -amount, "debit", 
@@ -1578,33 +1581,32 @@ namespace OpenSim.Modules.Currency
         {
             try
             {
-                using (var client = new WebClient())
+                var data = new
                 {
-                    client.Headers[HttpRequestHeader.ContentType] = "application/json";
-                    
-                    var data = new
-                    {
-                        consumer_key = m_consumerKey,
-                        consumer_secret = m_consumerSecret,
-                        amount = Math.Abs(amount),
-                        action = action,
-                        transaction_detail = description,
-                        payment_method = "opensim",
-                        note = $"OpenSim transaction {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}"
-                    };
-                    
-                    string json = SimpleJsonSerialize(data);
-                    var response = client.UploadString($"{m_restBaseUrl}/wallet/{userUUID}", "PUT", json);
-                    
-                    // Check for success in response
-                    return response.Contains("\"success\":true") || response.Contains("\"status\":\"success\"");
+                    consumer_key = m_consumerKey,
+                    consumer_secret = m_consumerSecret,
+                    amount = Math.Abs(amount),
+                    action = action,
+                    transaction_detail = description,
+                    payment_method = "opensim",
+                    note = $"OpenSim transaction {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}"
+                };
+                
+                string json = SimpleJsonSerialize(data);
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+                var response = httpClient.PutAsync($"{m_restBaseUrl}/wallet/{userUUID}", content).Result;
+                
+                if (response.IsSuccessStatusCode)
+                {
+                    var responseString = response.Content.ReadAsStringAsync().Result;
+                    return responseString.Contains("\"success\":true") || responseString.Contains("\"status\":\"success\"");
                 }
             }
             catch (Exception ex)
             {
                 m_log.ErrorFormat("[MONEY MODULE]: UpdateWalletViaRestApi: REST API exception updating wallet: {0}", ex.Message);
-                return false;
             }
+            return false;
         }
 
         /// <summary>

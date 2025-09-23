@@ -269,13 +269,14 @@ namespace OpenSim.Grid.MoneyServer
 
         private XmlRpcResponse buy_func(XmlRpcRequest request, IPEndPoint client)
         {
+            Hashtable requestData = (Hashtable)request.Params[0];
+            
             if (m_redirectEnabled)
             {
-                Hashtable requestData = (Hashtable)request.Params[0];
                 UUID userID = ExtractUserIDFromRequest(requestData);
-                int amount = ExtractAmountFromRequest(requestData);
+                int amountValue = ExtractAmountFromRequest(requestData);
                 
-                LogRedirectAttempt("buy_func", userID, amount, "currency purchase");
+                LogRedirectAttempt("buy_func", userID, amountValue, "currency purchase");
                 return BuildRedirectResponse("Currency purchase requires external verification");
             }
             
@@ -972,13 +973,14 @@ namespace OpenSim.Grid.MoneyServer
         /// <returns></returns>
         public XmlRpcResponse handleAddBankerMoney(XmlRpcRequest request, IPEndPoint remoteClient)
         {
+            Hashtable requestData = (Hashtable)request.Params[0];
+            
             if (m_redirectEnabled)
             {
-                Hashtable requestData = (Hashtable)request.Params[0];
                 UUID userID = ExtractUserIDFromRequest(requestData);
-                int amount = ExtractAmountFromRequest(requestData);
+                int amountValue = ExtractAmountFromRequest(requestData);
                 
-                LogRedirectAttempt("handleAddBankerMoney", userID, amount, "currency purchase");
+                LogRedirectAttempt("handleAddBankerMoney", userID, amountValue, "currency purchase");
                 return BuildRedirectResponse();
             }
             
@@ -987,12 +989,11 @@ namespace OpenSim.Grid.MoneyServer
 
             GetSSLCommonName(request);
 
-            Hashtable requestData   = (Hashtable)request.Params[0];
             XmlRpcResponse response = new XmlRpcResponse();
-            Hashtable responseData  = new Hashtable();
+            Hashtable responseData = new Hashtable();
             response.Value = responseData;
 
-            int    amount = 0;
+            int amount = 0;
             int    transactionType = 0;
             string senderID     = UUID.Zero.ToString();
             string bankerID     = string.Empty;
