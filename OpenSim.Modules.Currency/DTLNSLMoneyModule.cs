@@ -506,7 +506,7 @@ namespace OpenSim.Modules.Currency
 					MainServer.Instance.AddSimpleStreamHandler(new SimpleStreamHandler("/currency.php", ProcessCurrencyPHP_Simple));
 					MainServer.Instance.AddSimpleStreamHandler(new SimpleStreamHandler("/landtool.php", ProcessLandtoolPHP));
 
-					MainServer.Instance.AddStreamHandler(
+					/*MainServer.Instance.AddStreamHandler(
 						new RestStreamHandler("GET", "/currency/balance",
 							(requestBody, path, param, httpRequest, httpResponse) =>
 								ProcessCurrencyRest(requestBody, path, param, httpRequest, httpResponse)));
@@ -519,7 +519,7 @@ namespace OpenSim.Modules.Currency
 					MainServer.Instance.AddStreamHandler(
 						new RestStreamHandler("POST", "/currency/buy",
 							(requestBody, path, param, httpRequest, httpResponse) =>
-								ProcessCurrencyRest(requestBody, path, param, httpRequest, httpResponse)));
+								ProcessCurrencyRest(requestBody, path, param, httpRequest, httpResponse)));*/
 
 					HttpServer.AddXmlRPCHandler("money_balance_request", SimulatorUserBalanceRequestHandler);
 					HttpServer.AddXmlRPCHandler("money_transfer_request", RegionMoveMoneyHandler);
@@ -565,18 +565,8 @@ namespace OpenSim.Modules.Currency
 
 			RegisterCurrencyCapsCapability(scene);
 
-			ISimulatorFeaturesModule fm = scene.RequestModuleInterface<ISimulatorFeaturesModule>();
-			if (fm != null)
-			{
-				fm.OnSimulatorFeaturesRequest += (UUID agentID, ref OSDMap features) =>
-				{
-					features["currency"] = OSD.FromString(m_currencySymbol);
-					features["currency-base-uri"] = OSD.FromString(Util.AppendEndSlash(m_currencyBaseUri));
-
-					if (!string.IsNullOrEmpty(m_currencyCapsUrl))
-						features["Currency"] = OSD.FromString(m_currencyCapsUrl);
-				};
-			}
+			// Wire simulator features (currency symbol, base URI, and CAPS URL)
+			WireSimulatorFeatures(scene);
 
 			scene.EventManager.OnNewClient     += OnNewClient;
 			scene.EventManager.OnMakeRootAgent += OnMakeRootAgent;
@@ -3885,17 +3875,20 @@ namespace OpenSim.Modules.Currency
 			if (featuresModule == null)
 				return;
 
-			// Static extras to help viewers understand currency context
-			featuresModule.AddOpenSimExtraFeature("currency", OSD.FromString(m_currencySymbol));            // e.g., "OS$"
-			featuresModule.AddOpenSimExtraFeature("currency-base-uri", OSD.FromString(m_currencyBaseUri));  // base REST URI
+			// Static extras
+			featuresModule.AddOpenSimExtraFeature("currency", OSD.FromString(m_currencySymbol));
+			featuresModule.AddOpenSimExtraFeature("currency-base-uri", OSD.FromString(m_currencyBaseUri));
 
-			// Dynamic hook to ensure extras remain present
+			// Dynamic hook
 			featuresModule.OnSimulatorFeaturesRequest += (UUID requestingAgentID, ref OSDMap features) =>
 			{
 				if (!features.ContainsKey("currency"))
 					features["currency"] = OSD.FromString(m_currencySymbol);
 				if (!features.ContainsKey("currency-base-uri"))
 					features["currency-base-uri"] = OSD.FromString(m_currencyBaseUri);
+
+				if (!string.IsNullOrEmpty(m_currencyCapsUrl))
+					features["Currency"] = OSD.FromString(m_currencyCapsUrl);
 			};
 
 			m_log.Info("[MONEY MODULE]: SimulatorFeatures currency extras wired");
