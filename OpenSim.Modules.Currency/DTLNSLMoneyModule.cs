@@ -469,6 +469,16 @@ namespace OpenSim.Modules.Currency
 			if (scene == null) return;
 
 			scene.RegisterModuleInterface<IMoneyModule>(this);
+			
+			// Register CAPS FIRST
+			RegisterCurrencyCapsCapability(scene);
+			
+			// Force features update after a short delay to ensure CAPS is registered
+			System.Threading.ThreadPool.QueueUserWorkItem(delegate
+			{
+				System.Threading.Thread.Sleep(2000); // Wait 2 seconds for CAPS registration
+				WireSimulatorFeatures(scene);
+			});
 
 			if (string.IsNullOrEmpty(m_moneyServURL))
 			{
@@ -489,7 +499,7 @@ namespace OpenSim.Modules.Currency
 			{
 				if (m_sceneList.Count == 0)
 				{
-					HttpServer = new BaseHttpServer(9000);
+					//HttpServer = new BaseHttpServer(9000);
 
 					MainServer.Instance.AddSimpleStreamHandler(new SimpleStreamHandler("/currency.php", ProcessCurrencyPHP_Simple));
 					MainServer.Instance.AddSimpleStreamHandler(new SimpleStreamHandler("/landtool.php", ProcessLandtoolPHP));
@@ -509,11 +519,11 @@ namespace OpenSim.Modules.Currency
 							(requestBody, path, param, httpRequest, httpResponse) =>
 								ProcessCurrencyRest(requestBody, path, param, httpRequest, httpResponse)));*/
 
-					HttpServer.AddXmlRPCHandler("money_balance_request", SimulatorUserBalanceRequestHandler);
+					/*HttpServer.AddXmlRPCHandler("money_balance_request", SimulatorUserBalanceRequestHandler);
 					HttpServer.AddXmlRPCHandler("money_transfer_request", RegionMoveMoneyHandler);
 					HttpServer.AddXmlRPCHandler("buy_currency", BuyCurrencyHandler);
 					HttpServer.AddXmlRPCHandler("getCurrencyQuote", GetCurrencyQuoteHandler);
-					HttpServer.AddXmlRPCHandler("buyCurrency", BuyCurrencyHandler);
+					HttpServer.AddXmlRPCHandler("buyCurrency", BuyCurrencyHandler);*/
 
 					MainServer.Instance.AddXmlRPCHandler("money_balance_request", SimulatorUserBalanceRequestHandler);
 					MainServer.Instance.AddXmlRPCHandler("money_transfer_request", RegionMoveMoneyHandler);
@@ -527,13 +537,13 @@ namespace OpenSim.Modules.Currency
 					}
 					else if (m_enable_server)
 					{
-						HttpServer.AddXmlRPCHandler("OnMoneyTransfered", OnMoneyTransferedHandler);
+						/*HttpServer.AddXmlRPCHandler("OnMoneyTransfered", OnMoneyTransferedHandler);
 						HttpServer.AddXmlRPCHandler("UpdateBalance", BalanceUpdateHandler);
 						HttpServer.AddXmlRPCHandler("UserAlert", UserAlertHandler);
 						HttpServer.AddXmlRPCHandler("GetBalance", GetBalanceHandler);
 						HttpServer.AddXmlRPCHandler("AddBankerMoney", AddBankerMoneyHandler);
 						HttpServer.AddXmlRPCHandler("SendMoney", SendMoneyHandler);
-						HttpServer.AddXmlRPCHandler("MoveMoney", MoveMoneyHandler);
+						HttpServer.AddXmlRPCHandler("MoveMoney", MoveMoneyHandler);*/
 
 						MainServer.Instance.AddXmlRPCHandler("OnMoneyTransfered", OnMoneyTransferedHandler);
 						MainServer.Instance.AddXmlRPCHandler("UpdateBalance", BalanceUpdateHandler);
@@ -550,18 +560,6 @@ namespace OpenSim.Modules.Currency
 				else
 					m_sceneList.Add(scene.RegionInfo.RegionHandle, scene);
 			}
-
-			RegisterCurrencyCapsCapability(scene);
-			
-			// Force features update after a short delay to ensure CAPS is registered
-			System.Threading.ThreadPool.QueueUserWorkItem(delegate
-			{
-				System.Threading.Thread.Sleep(2000); // Wait 2 seconds for CAPS registration
-				WireSimulatorFeatures(scene);
-			});
-
-			// Wire simulator features (currency symbol, base URI, and CAPS URL)
-			WireSimulatorFeatures(scene);
 
 			scene.EventManager.OnNewClient     += OnNewClient;
 			scene.EventManager.OnMakeRootAgent += OnMakeRootAgent;
@@ -2330,7 +2328,7 @@ namespace OpenSim.Modules.Currency
 		}
 
 		/// <summary>
-		/// Handle CAPS currency requests that use LLSD format
+		/// Handle CAPS currency requests with proper LLSD formatting
 		/// </summary>
 		private string HandleCapsCurrencyRequest(string requestBody, IOSHttpRequest httpRequest, IOSHttpResponse httpResponse)
 		{
@@ -2338,31 +2336,30 @@ namespace OpenSim.Modules.Currency
 			m_log.InfoFormat("[MONEY MODULE]: URL: {0}", httpRequest.Url.ToString());
 			m_log.InfoFormat("[MONEY MODULE]: Method: {0}", httpRequest.HttpMethod);
 			m_log.InfoFormat("[MONEY MODULE]: Content-Type: {0}", httpRequest.ContentType);
-			m_log.InfoFormat("[MONEY MODULE]: Content-Length: {0}", httpRequest.ContentLength);
-			m_log.InfoFormat("[MONEY MODULE]: Request Body: {0}", requestBody);
-			m_log.InfoFormat("[MONEY MODULE] ===== CAPS CURRENCY REQUEST END =====");
 			
 			try
 			{
 				OSDMap requestMap = null;
 				
-				// Parse the LLSD request
+				// Parse LLSD request
 				if (!string.IsNullOrEmpty(requestBody))
 				{
 					try
 					{
 						requestMap = OSDParser.DeserializeLLSDXml(requestBody) as OSDMap;
-						m_log.InfoFormat("[MONEY MODULE]: Parsed LLSD request: {0}", requestMap != null ? requestMap.ToString() : "NULL");
+						m_log.InfoFormat("[MONEY MODULE]: Parsed LLSD request: {0}", 
+							requestMap != null ? requestMap.ToString() : "NULL");
 					}
 					catch (Exception parseEx)
 					{
-						m_log.WarnFormat("[MONEY MODULE]: LLSD parse failed, trying JSON: {0}", parseEx.Message);
-						// Try JSON format as fallback
+						m_log.WarnFormat("[MONEY MODULE]: LLSD parse failed: {0}", parseEx.Message);
+						// Try JSON as fallback
 						requestMap = OSDParser.DeserializeJson(requestBody) as OSDMap;
 					}
 				}
 
 				string action = "quote"; // Default action
+				UUID agentId = UUID.Zero;
 				int currencyBuy = 1000;  // Default amount
 				
 				if (requestMap != null)
@@ -2370,15 +2367,20 @@ namespace OpenSim.Modules.Currency
 					if (requestMap.ContainsKey("action"))
 						action = requestMap["action"].AsString().ToLower();
 						
+					if (requestMap.ContainsKey("agentId"))
+						agentId = requestMap["agentId"].AsUUID();
+						
 					if (requestMap.ContainsKey("currencyBuy"))
 						currencyBuy = requestMap["currencyBuy"].AsInteger();
 				}
 
-				m_log.InfoFormat("[MONEY MODULE]: Currency CAPS request - Action: {0}, Amount: {1}", action, currencyBuy);
+				m_log.InfoFormat("[MONEY MODULE]: Currency CAPS request - Action: {0}, Agent: {1}, Amount: {2}", 
+					action, agentId, currencyBuy);
 
+				// Handle different actions
 				if (action == "quote")
 				{
-					return HandleCurrencyQuoteCaps(currencyBuy, httpRequest, httpResponse);
+					return HandleCurrencyQuoteCaps(agentId, currencyBuy, httpRequest, httpResponse);
 				}
 				else if (action == "buy")
 				{
@@ -2397,22 +2399,35 @@ namespace OpenSim.Modules.Currency
 			}
 		}
 
-		private string HandleCurrencyQuoteCaps(int currencyBuy, IOSHttpRequest httpRequest, IOSHttpResponse httpResponse)
+		private string HandleCurrencyQuoteCaps(UUID agentId, int currencyBuy, IOSHttpRequest httpRequest, IOSHttpResponse httpResponse)
 		{
-			m_log.InfoFormat("[MONEY MODULE]: Handling currency quote for {0} units", currencyBuy);
+			m_log.InfoFormat("[MONEY MODULE]: Handling currency quote for agent {0}, amount {1}", agentId, currencyBuy);
 			
 			var response = new OSDMap();
-			response["success"] = OSD.FromBoolean(true);
-
-			var currencyData = new OSDMap();
 			
-			// Calculate cost - adjust these values based on your economy
-			int estimatedCost = CalculateRealMoneyCost(currencyBuy);
-			currencyData["estimatedCost"] = OSD.FromInteger(estimatedCost);
-			currencyData["currencyBuy"] = OSD.FromInteger(currencyBuy);
-			
-			response["currency"] = currencyData;
-			response["confirm"] = OSD.FromString(GenerateConfirmationHash(UUID.Zero, httpRequest.RemoteIPEndPoint.Address.ToString()));
+			if (m_redirectEnabled)
+			{
+				// When redirect is enabled, return success=false with redirect info
+				response["success"] = OSD.FromBoolean(false);
+				response["errorMessage"] = OSD.FromString(m_redirectMessage);
+				response["errorURI"] = OSD.FromString(m_redirectUrl);
+			}
+			else
+			{
+				// Calculate actual quote
+				int estimatedCost = CalculateRealMoneyCost(currencyBuy);
+				
+				response["success"] = OSD.FromBoolean(true);
+				
+				var currencyData = new OSDMap();
+				currencyData["estimatedCost"] = OSD.FromInteger(estimatedCost);
+				currencyData["currencyBuy"] = OSD.FromInteger(currencyBuy);
+				
+				response["currency"] = currencyData;
+				response["confirm"] = OSD.FromString(GenerateConfirmationHash(agentId, httpRequest.RemoteIPEndPoint.Address.ToString()));
+				
+				m_log.InfoFormat("[MONEY MODULE]: Currency quote - {0} units cost {1}", currencyBuy, estimatedCost);
+			}
 
 			httpResponse.ContentType = "application/llsd+xml";
 			httpResponse.StatusCode = 200;
@@ -2421,7 +2436,6 @@ namespace OpenSim.Modules.Currency
 			m_log.InfoFormat("[MONEY MODULE]: Currency quote response: {0}", responseString);
 			return responseString;
 		}
-
 		private string HandleCurrencyBuyCaps(OSDMap request, IOSHttpRequest httpRequest, IOSHttpResponse httpResponse)
 		{
 			m_log.InfoFormat("[MONEY MODULE]: Handling currency buy request");
