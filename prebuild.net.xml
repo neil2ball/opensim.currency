@@ -86,8 +86,10 @@
       <Reference name="Mono.Addins.dll" path="../../bin/"/>
       <Reference name="OpenMetaverseTypes.dll" path="../../bin/"/>
       <Reference name="OpenMetaverse.dll" path="../../bin/"/>
+      <Reference name="OpenMetaverse.StructuredData.dll" path="../../bin/"/>
       <Reference name="OpenSim.Region.Framework" path="../../bin/"/>
       <Reference name="OpenSim.Framework" path="../../bin/"/>
+      <Reference name="OpenSim.Capabilities" path="../../bin/"/>
       <Reference name="OpenSim.Framework.Console" path="../../bin/"/>
       <Reference name="OpenSim.Framework.Servers" path="../../bin/"/>
       <Reference name="OpenSim.Framework.Servers.HttpServer" path="../../bin/"/>
