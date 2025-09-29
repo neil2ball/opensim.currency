@@ -39,6 +39,8 @@ using System.Security.Cryptography.X509Certificates;
 using System.Web;
 using System.IO;
 using System.Globalization;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 using log4net;
 using Nini.Config;
@@ -141,7 +143,8 @@ namespace OpenSim.Modules.Currency
 		
 		private string m_currencySymbol = string.Empty;
 		private string m_currencyBaseUri = string.Empty;
-		private string m_currencyCapsUrl = string.Empty;
+		
+		private readonly Dictionary<UUID,string> _currencyCapsUrls = new();
 
         private IConfigSource m_config;
 
@@ -220,6 +223,7 @@ namespace OpenSim.Modules.Currency
         /// <param name="source"></param>
         public void Initialise(Scene scene, IConfigSource source)
         {
+			
 			m_currencyBaseUri = Util.AppendEndSlash(scene.RegionInfo.ServerURI);
             Initialise(source);
             if (string.IsNullOrEmpty(m_moneyServURL))
@@ -426,59 +430,55 @@ namespace OpenSim.Modules.Currency
 		/// </summary>
 		public void RegisterCurrencyCapsCapability(Scene scene)
 		{
-			try
+			scene.EventManager.OnRegisterCaps += (agentID, caps) =>
 			{
-				scene.EventManager.OnRegisterCaps += (agentID, caps) =>
+				var capsPath = "/CAPS/" + UUID.Random() + "/currency.php";
+				caps.RegisterHandler("currency.php",
+					new RestStreamHandler("POST", capsPath,
+						(body, path, param, httpRequest, httpResponse) =>
+							ProcessCurrencyPHP(path, body, httpRequest, httpResponse)));
+
+				var url = scene.RegionInfo.ServerURI.TrimEnd('/') + capsPath;
+				_currencyCapsUrls[agentID] = url;
+
+				m_log.InfoFormat("[MONEY MODULE]: Registered CAPS URL {0} for agent {1}", url, agentID);
+
+				// Attach the features handler here, so it closes over this agentID + url
+				var featuresModule = scene.RequestModuleInterface<ISimulatorFeaturesModule>();
+				if (featuresModule != null)
 				{
-					try
+					featuresModule.OnSimulatorFeaturesRequest += (UUID reqAgentID, ref OSDMap features) =>
 					{
-						// Register the CAPS handler and capture the URL it returns
-						UUID uuid = UUID.Random();
-						string capsObjectPath = "/CAPS/" + uuid + "/currency.php";
-						        caps.RegisterHandler("currency.php",
-									new RestStreamHandler("POST", capsObjectPath,
-										(body, path, param, httpRequest, httpResponse) =>
-										{
-											return ProcessCurrencyPHP(path, body, httpRequest, httpResponse);
-										}));
+						if (reqAgentID == agentID)
+						{
+							features["currency"] = OSD.FromString(m_currencySymbol);
+							features["currency-base-uri"] = OSD.FromString(url);
 
+							if (!features.ContainsKey("OpenSimExtras"))
+								features["OpenSimExtras"] = new OSDMap();
 
-						m_currencyCapsUrl = scene.RegionInfo.ServerURI.TrimEnd('/') + capsObjectPath;
-						
-						m_log.InfoFormat(
-							"[MONEY MODULE]: Registered Currency CAPS for agent {0} in region {1}, URL {2}",
-							agentID, scene.RegionInfo.RegionName, m_currencyCapsUrl);
-					}
-					catch (Exception ex)
-					{
-						m_log.ErrorFormat(
-							"[MONEY MODULE]: Error registering Currency CAPS: {0}",
-							ex.Message);
-					}
-				};
-			}
-			catch (Exception ex)
-			{
-				m_log.WarnFormat("[MONEY MODULE]: CAPS registration failed: {0}", ex.Message);
-			}
+							var extras = (OSDMap)features["OpenSimExtras"];
+							extras["currency"] = OSD.FromString(m_currencySymbol);
+							extras["currency-base-uri"] = OSD.FromString(url);
+
+							m_log.InfoFormat(
+								"[MONEY MODULE]: Advertising currency-base-uri {0} for agent {1}",
+								url, reqAgentID);
+						}
+					};
+				}
+			};
 		}
-
+		
 		public void AddRegion(Scene scene)
 		{
+			// Register CAPS FIRST
+			RegisterCurrencyCapsCapability(scene);
+			
 			if (scene == null) return;
 
 			scene.RegisterModuleInterface<IMoneyModule>(this);
 			
-			// Register CAPS FIRST
-			RegisterCurrencyCapsCapability(scene);
-			
-			// Force features update after a short delay to ensure CAPS is registered
-			System.Threading.ThreadPool.QueueUserWorkItem(delegate
-			{
-				System.Threading.Thread.Sleep(2000); // Wait 2 seconds for CAPS registration
-				WireSimulatorFeatures(scene);
-			});
-
 			if (string.IsNullOrEmpty(m_moneyServURL))
 			{
 				m_moneyServURL = GetRegionServerCurrencyUrl(scene);
@@ -2539,42 +2539,6 @@ namespace OpenSim.Modules.Currency
 		}
 
 		/// <summary>
-		/// Process currency.php requests - with correct SimpleStreamHandler signature
-		/// </summary>
-		/*public void ProcessCurrencyPHP_Simple(IOSHttpRequest request, IOSHttpResponse response)
-		{
-			m_log.InfoFormat("[MONEY MODULE]: ProcessCurrencyPHP_Simple: Handling currency.php request");
-
-			try
-			{
-				// Convert to the expected types for the REST handler
-				string path = request.Url.AbsolutePath;
-				Stream inputStream = request.InputStream;
-				IOSHttpRequest osRequest = request;
-				IOSHttpResponse osResponse = response;
-
-				// Call the REST handler which returns a string
-				string result = ProcessCurrencyPHP(path, inputStream, osRequest, osResponse);
-
-				// Always flush the response, even if result is empty
-				if (!string.IsNullOrEmpty(result))
-				{
-					byte[] buffer = Encoding.UTF8.GetBytes(result);
-					response.ContentType = "text/xml";
-					response.ContentLength = buffer.Length;
-					response.OutputStream.Write(buffer, 0, buffer.Length);
-					response.OutputStream.Flush();
-				}
-			}
-			catch (Exception ex)
-			{
-				m_log.ErrorFormat("[MONEY MODULE]: ProcessCurrencyPHP_Simple error: {0}", ex.Message);
-				response.StatusCode = 500;
-				response.StatusDescription = "Internal server error";
-			}
-		}*/
-
-		/// <summary>
 		/// Process currency.php requests - with correct RestMethod signature
 		/// </summary>
 		public string ProcessCurrencyPHP(string path, string body,
@@ -2627,6 +2591,68 @@ namespace OpenSim.Modules.Currency
 
 			return string.Empty;
 		}
+		
+		//json for whenever we get around to it
+		/*public string ProcessCurrencyPHP(string path, string body,
+										 IOSHttpRequest httpRequest, IOSHttpResponse httpResponse)
+		{
+			m_log.InfoFormat("[MONEY MODULE]: ProcessCurrencyPHP: Handling currency request for path: {0}", httpRequest.Url);
+
+			try
+			{
+				// Parse the incoming JSON request
+				using var doc = JsonDocument.Parse(body);
+				var root = doc.RootElement;
+
+				string method = root.TryGetProperty("method", out var methodEl)
+									? methodEl.GetString()
+									: string.Empty;
+
+				// Default values
+				int currencyBuy = 0;
+				int estimatedCost = 0;
+
+				if (root.TryGetProperty("currencyBuy", out var buyEl))
+					currencyBuy = buyEl.GetInt32();
+
+				if (root.TryGetProperty("estimatedCost", out var costEl))
+					estimatedCost = costEl.GetInt32();
+
+				// TODO: If you want, call GetCurrencyQuoteHandler here to calculate real values
+
+				// Build the JSON response in the schema the viewer expects
+				var response = new
+				{
+					success = true,
+					currency = new
+					{
+						estimatedCost = estimatedCost,
+						currencyBuy = currencyBuy,
+						currencyEstimated = estimatedCost,
+						currencyTotal = estimatedCost
+					},
+					confirm = new
+					{
+						currencyBuy = currencyBuy,
+						estimatedCost = estimatedCost,
+						currencyTotal = estimatedCost
+					}
+				};
+
+				string json = JsonSerializer.Serialize(response);
+
+				// Set the content type and return the JSON string.
+				// RestStreamHandler will write this once to the response.
+				httpResponse.ContentType = "application/json";
+				return json;
+			}
+			catch (Exception ex)
+			{
+				m_log.ErrorFormat("[MONEY MODULE]: ProcessCurrencyPHP error: {0}", ex);
+				SendErrorResponse(httpResponse, 500, "Internal server error");
+				return string.Empty;
+			}
+		}*/
 
 
 		/// <summary>
@@ -3931,35 +3957,6 @@ namespace OpenSim.Modules.Currency
 			httpResponse.OutputStream.Flush();
 		}
 		
-		// Called during module initialisation/region add
-		private void WireSimulatorFeatures(Scene scene)
-		{
-			var featuresModule = scene.RequestModuleInterface<ISimulatorFeaturesModule>();
-			if (featuresModule == null)
-			{
-				m_log.Warn("[MONEY MODULE]: ISimulatorFeaturesModule not found - currency features disabled");
-				return;
-			}
-
-			featuresModule.OnSimulatorFeaturesRequest += (UUID requestingAgentID, ref OSDMap features) =>
-			{
-				// Top-level features
-				features["currency"] = OSD.FromString(m_currencySymbol);
-				features["currency-base-uri"] = OSD.FromString(m_currencyCapsUrl);
-
-				// OpenSimExtras block
-				if (!features.ContainsKey("OpenSimExtras"))
-					features["OpenSimExtras"] = new OSDMap();
-
-				if (features["OpenSimExtras"] is OSDMap extras)
-				{
-					extras["currency"] = OSD.FromString(m_currencySymbol);
-					extras["currency-base-uri"] = OSD.FromString(m_currencyCapsUrl);
-				}
-			};
-
-			m_log.Info("[MONEY MODULE]: SimulatorFeatures currency extras wired");
-		}
         #endregion
     }
 }
