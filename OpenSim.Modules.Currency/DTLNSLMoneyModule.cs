@@ -433,22 +433,18 @@ namespace OpenSim.Modules.Currency
 					try
 					{
 						// Register the CAPS handler and capture the URL it returns
-						caps.RegisterHandler(
-								"Currency",
-								new RestStreamHandler("POST", "/CAPS/Currency",
-									(requestBody, path, param, httpRequest, httpResponse) =>
-										HandleCapsCurrencyRequest(requestBody, httpRequest, httpResponse)
-								)
-							);
+						UUID uuid = UUID.Random();
+						string capsObjectPath = "/CAPS/" + uuid;
+						        caps.RegisterHandler("Currency",
+									new RestStreamHandler("POST", capsObjectPath,
+										(request, path, param, httpRequest, httpResponse) =>
+											HandleCapsCurrencyRequest(request, httpRequest, httpResponse)));
 
-						m_currencyCapsUrl = scene.RegionInfo.ServerURI + caps.CapsObjectPath + "/Currency";
-
+						m_currencyCapsUrl = scene.RegionInfo.ServerURI + "CAPS/" + uuid;
+						
 						m_log.InfoFormat(
 							"[MONEY MODULE]: Registered Currency CAPS for agent {0} in region {1}, URL {2}",
 							agentID, scene.RegionInfo.RegionName, m_currencyCapsUrl);
-
-						// Update simulator features immediately so the viewer sees it
-						WireSimulatorFeatures(scene);
 					}
 					catch (Exception ex)
 					{
@@ -2299,7 +2295,7 @@ namespace OpenSim.Modules.Currency
 				}
 
 				// Otherwise, handle any fixed REST API endpoints you’ve defined
-				if (absPath.Contains("/currency/quote"))
+				/*if (absPath.Contains("/currency/quote"))
 				{
 					HandleCurrencyQuote(httpRequest, httpResponse);
 				}
@@ -2315,7 +2311,7 @@ namespace OpenSim.Modules.Currency
 				{
 					m_log.WarnFormat("[MONEY MODULE]: ProcessCurrencyRest: Unknown path: {0}", absPath);
 					SendErrorResponse(httpResponse, 404, "Unknown endpoint");
-				}
+				}*/
 			}
 			catch (Exception ex)
 			{
@@ -2425,6 +2421,7 @@ namespace OpenSim.Modules.Currency
 			m_log.InfoFormat("[MONEY MODULE]: Currency quote response: {0}", responseString);
 			return responseString;
 		}
+		
 		private string HandleCurrencyBuyCaps(OSDMap request, IOSHttpRequest httpRequest, IOSHttpResponse httpResponse)
 		{
 			m_log.InfoFormat("[MONEY MODULE]: Handling currency buy request");
@@ -2586,7 +2583,7 @@ namespace OpenSim.Modules.Currency
 			{
 				string absPath = httpRequest.Url.AbsolutePath.ToLower();
 
-				if (absPath.Contains("/currency/quote"))
+				/*if (absPath.Contains("/currency/quote"))
 				{
 					HandleCurrencyQuote(httpRequest, httpResponse);
 				}
@@ -2599,7 +2596,7 @@ namespace OpenSim.Modules.Currency
 					HandleCurrencyBalance(httpRequest, httpResponse);
 				}
 				else
-				{
+				{*/
 					// Fallback to XML-RPC for legacy endpoints
 					Dictionary<string, XmlRpcMethod> rpcHandlers = new Dictionary<string, XmlRpcMethod>();
 					rpcHandlers["getCurrencyQuote"] = new XmlRpcMethod(GetCurrencyQuoteHandler);
@@ -2619,7 +2616,7 @@ namespace OpenSim.Modules.Currency
 					{
 						m_log.Error("[MONEY MODULE]: Could not cast to OSHttpRequest/OSHttpResponse for legacy XML-RPC handling");
 					}
-				}
+				//}
 			}
 			catch (Exception ex)
 			{
@@ -3933,7 +3930,7 @@ namespace OpenSim.Modules.Currency
 		}
 		
 		// Called during module initialisation/region add
-		private void WireSimulatorFeatures(Scene scene)
+/*		private void WireSimulatorFeatures(Scene scene)
 		{
 			var featuresModule = scene.RequestModuleInterface<ISimulatorFeaturesModule>();
 			if (featuresModule == null)
@@ -3944,27 +3941,20 @@ namespace OpenSim.Modules.Currency
 
 			// Add static currency features
 			featuresModule.AddOpenSimExtraFeature("currency", OSD.FromString(m_currencySymbol));
-			featuresModule.AddOpenSimExtraFeature("currency-base-uri", OSD.FromString(m_currencyBaseUri));
+			featuresModule.AddOpenSimExtraFeature("currency-base-uri", OSD.FromString(m_currencyCapsUrl));
 			
 			// Add dynamic features including CAPS URL
 			featuresModule.OnSimulatorFeaturesRequest += (UUID requestingAgentID, ref OSDMap features) =>
 			{
-				if (!features.ContainsKey("currency"))
+				//if (!features.ContainsKey("Currency"))
+					//featuresModule.AddFeature("Currency", OSD.FromString(m_currencyCapsUrl));
+					featuresModule.AddFeature("currency-base-uri", OSD.FromString(m_currencyCapsUrl));
+				
+				//if (!features.ContainsKey("currency"))
 					features["currency"] = OSD.FromString(m_currencySymbol);
 					
-				if (!features.ContainsKey("currency-base-uri"))
-					features["currency-base-uri"] = OSD.FromString(m_currencyBaseUri);
-
-				// CRITICAL: Add the Currency CAPS URL that Firestorm expects
-				if (!string.IsNullOrEmpty(m_currencyCapsUrl))
-				{
-					features["Currency"] = OSD.FromString(m_currencyCapsUrl);
-					m_log.InfoFormat("[MONEY MODULE]: Added Currency CAPS URL to features: {0}", m_currencyCapsUrl);
-				}
-				else
-				{
-					m_log.Warn("[MONEY MODULE]: Currency CAPS URL is empty - viewer currency may not work");
-				}
+				//if (!features.ContainsKey("currency-base-uri"))
+					//features["currency-base-uri"] = OSD.FromString(m_currencyCapsUrl);
 
 				// Add other currency-related features Firestorm might expect
 				if (!features.ContainsKey("OpenSimExtras"))
@@ -3973,8 +3963,37 @@ namespace OpenSim.Modules.Currency
 				OSDMap opensimExtras = features["OpenSimExtras"] as OSDMap;
 				if (opensimExtras != null)
 				{
+					//opensimExtras["Currency"] = OSD.FromString(m_currencyCapsUrl);
 					opensimExtras["currency"] = OSD.FromString(m_currencySymbol);
-					opensimExtras["currency-base-uri"] = OSD.FromString(m_currencyBaseUri);
+					opensimExtras["currency-base-uri"] = OSD.FromString(m_currencyCapsUrl);
+				}
+			};
+
+			m_log.Info("[MONEY MODULE]: SimulatorFeatures currency extras wired");
+		}*/
+		private void WireSimulatorFeatures(Scene scene)
+		{
+			var featuresModule = scene.RequestModuleInterface<ISimulatorFeaturesModule>();
+			if (featuresModule == null)
+			{
+				m_log.Warn("[MONEY MODULE]: ISimulatorFeaturesModule not found - currency features disabled");
+				return;
+			}
+
+			featuresModule.OnSimulatorFeaturesRequest += (UUID requestingAgentID, ref OSDMap features) =>
+			{
+				// Top-level features
+				features["currency"] = OSD.FromString(m_currencySymbol);
+				features["currency-base-uri"] = OSD.FromString(m_currencyCapsUrl);
+
+				// OpenSimExtras block
+				if (!features.ContainsKey("OpenSimExtras"))
+					features["OpenSimExtras"] = new OSDMap();
+
+				if (features["OpenSimExtras"] is OSDMap extras)
+				{
+					extras["currency"] = OSD.FromString(m_currencySymbol);
+					extras["currency-base-uri"] = OSD.FromString(m_currencyCapsUrl);
 				}
 			};
 
