@@ -970,7 +970,7 @@ namespace OpenSim.Modules.Currency
             bool isSenderLocal = m_useRestApi && m_restApiValid && IsLocalUser(sender);
             bool isReceiverLocal = m_useRestApi && m_restApiValid && IsLocalUser(receiver);
 
-            if (m_disableXmlRpc)
+            if (m_disableXmlRpc && IsExternalMoneyServer())
             {
                 // When XML-RPC is disabled, only allow transactions between local users
                 if (!isSenderLocal || !isReceiverLocal)
@@ -1513,7 +1513,7 @@ namespace OpenSim.Modules.Currency
         // "OnMoneyTransfered" RPC from MoneyServer
         public XmlRpcResponse OnMoneyTransferedHandler(XmlRpcRequest request, IPEndPoint remoteClient)
         {
-            if (m_disableXmlRpc)
+            if (m_disableXmlRpc && IsExternalMoneyServer())
             {
                 m_log.WarnFormat("[MONEY MODULE]: OnMoneyTransferedHandler blocked - XML-RPC disabled");
                 
@@ -1587,7 +1587,7 @@ namespace OpenSim.Modules.Currency
         // "UpdateBalance" RPC from MoneyServer or Script
         public XmlRpcResponse BalanceUpdateHandler(XmlRpcRequest request, IPEndPoint remoteClient)
         {
-            if (m_disableXmlRpc)
+            if (m_disableXmlRpc && IsExternalMoneyServer())
             {
                 m_log.WarnFormat("[MONEY MODULE]: BalanceUpdateHandler blocked - XML-RPC disabled");
                 
@@ -1665,7 +1665,7 @@ namespace OpenSim.Modules.Currency
         // "UserAlert" RPC from Script
         public XmlRpcResponse UserAlertHandler(XmlRpcRequest request, IPEndPoint remoteClient)
         {
-            if (m_disableXmlRpc)
+            if (m_disableXmlRpc && IsExternalMoneyServer())
             {
                 m_log.WarnFormat("[MONEY MODULE]: UserAlertHandler blocked - XML-RPC disabled");
                 
@@ -1729,7 +1729,7 @@ namespace OpenSim.Modules.Currency
         // "GetBalance" RPC from Script
         public XmlRpcResponse GetBalanceHandler(XmlRpcRequest request, IPEndPoint remoteClient)
         {
-            if (m_disableXmlRpc)
+            if (m_disableXmlRpc && IsExternalMoneyServer())
             {
                 m_log.WarnFormat("[MONEY MODULE]: GetBalanceHandler blocked - XML-RPC disabled");
                 
@@ -1794,8 +1794,7 @@ namespace OpenSim.Modules.Currency
 			m_log.InfoFormat("[MONEY MODULE]: AddBankerMoneyHandler:");
 
 			// SHORT-CIRCUIT: If redirect is enabled, handle ALL requests as redirects
-			// Let the external web server distinguish between quotes and purchases
-			if (m_redirectEnabled)
+			if (m_redirectEnabled && !IsQuoteRequest(request))
 			{
 				Hashtable requestParam = (Hashtable)request.Params[0];
 				UUID userID = UUID.Zero;
@@ -1830,7 +1829,7 @@ namespace OpenSim.Modules.Currency
 				return redirectResponse;
 			}
 			
-			if (m_disableXmlRpc)
+			if (m_disableXmlRpc && IsExternalMoneyServer())
 			{
 				m_log.WarnFormat("[MONEY MODULE]: AddBankerMoneyHandler blocked - XML-RPC disabled");
 				
@@ -1903,11 +1902,25 @@ namespace OpenSim.Modules.Currency
 			resp.Value = paramTable;
 			return resp;
 		}
+		
+		private bool IsQuoteRequest(XmlRpcRequest request)
+		{
+			// Determine if this is a quote request vs purchase request
+			// Based on your application logic
+			if (request.Params.Count > 0)
+			{
+				Hashtable requestParam = (Hashtable)request.Params[0];
+				// Add logic to distinguish quote vs purchase
+				return requestParam.ContainsKey("getQuote") || 
+					   (request.MethodName?.ToLower().Contains("quote") ?? false);
+			}
+			return false;
+		}
 
        // "SendMoney" RPC from Script
         public XmlRpcResponse SendMoneyHandler(XmlRpcRequest request, IPEndPoint remoteClient)
         {
-            if (m_disableXmlRpc)
+            if (m_disableXmlRpc && IsExternalMoneyServer())
             {
                 m_log.WarnFormat("[MONEY MODULE]: SendMoneyHandler blocked - XML-RPC disabled");
                 
@@ -1988,7 +2001,7 @@ namespace OpenSim.Modules.Currency
         // "MoveMoney" RPC from Script
         public XmlRpcResponse MoveMoneyHandler(XmlRpcRequest request, IPEndPoint remoteClient)
         {
-            if (m_disableXmlRpc)
+            if (m_disableXmlRpc && IsExternalMoneyServer())
             {
                 m_log.WarnFormat("[MONEY MODULE]: MoveMoneyHandler blocked - XML-RPC disabled");
                 
@@ -2139,7 +2152,7 @@ namespace OpenSim.Modules.Currency
 				return errorResp;
 			}
 
-			if (m_redirectEnabled)
+			if (m_redirectEnabled && !IsQuoteRequest(request))
 			{
 				m_log.InfoFormat("[MONEY MODULE]: BuyCurrencyHandler: Redirecting agent {0} to purchase page", agentId);
 				
@@ -2177,20 +2190,6 @@ namespace OpenSim.Modules.Currency
         /// </summary>
         public XmlRpcResponse SimulatorUserBalanceRequestHandler(XmlRpcRequest request, IPEndPoint remoteClient)
         {
-            // This is OpenSim internal communication - subject to XML-RPC disable
-            if (m_disableXmlRpc)
-            {
-                m_log.WarnFormat("[MONEY MODULE]: SimulatorUserBalanceRequestHandler blocked - XML-RPC disabled");
-                
-                XmlRpcResponse disabledResp = new XmlRpcResponse();
-                Hashtable disabledParamTable = new Hashtable();
-                disabledParamTable["success"] = false;
-                disabledParamTable["errorMessage"] = "XML-RPC transactions are disabled. Please use the REST API for local currency transactions.";
-                disabledParamTable["error_code"] = "XML_RPC_DISABLED";
-                disabledResp.Value = disabledParamTable;
-                return disabledResp;
-            }
-
             m_log.InfoFormat("[MONEY MODULE]: SimulatorUserBalanceRequestHandler:");
 
             if (request.Params.Count > 0)
@@ -2232,7 +2231,7 @@ namespace OpenSim.Modules.Currency
         public XmlRpcResponse RegionMoveMoneyHandler(XmlRpcRequest request, IPEndPoint remoteClient)
         {
             // This is OpenSim internal communication - subject to XML-RPC disable
-            if (m_disableXmlRpc)
+            if (m_disableXmlRpc && IsExternalMoneyServer())
             {
                 m_log.WarnFormat("[MONEY MODULE]: RegionMoveMoneyHandler blocked - XML-RPC disabled");
                 
@@ -2405,29 +2404,19 @@ namespace OpenSim.Modules.Currency
 			
 			var response = new OSDMap();
 			
-			if (m_redirectEnabled)
-			{
-				// When redirect is enabled, return success=false with redirect info
-				response["success"] = OSD.FromBoolean(false);
-				response["errorMessage"] = OSD.FromString(m_redirectMessage);
-				response["errorURI"] = OSD.FromString(m_redirectUrl);
-			}
-			else
-			{
-				// Calculate actual quote
-				int estimatedCost = CalculateRealMoneyCost(currencyBuy);
-				
-				response["success"] = OSD.FromBoolean(true);
-				
-				var currencyData = new OSDMap();
-				currencyData["estimatedCost"] = OSD.FromInteger(estimatedCost);
-				currencyData["currencyBuy"] = OSD.FromInteger(currencyBuy);
-				
-				response["currency"] = currencyData;
-				response["confirm"] = OSD.FromString(GenerateConfirmationHash(agentId, httpRequest.RemoteIPEndPoint.Address.ToString()));
-				
-				m_log.InfoFormat("[MONEY MODULE]: Currency quote - {0} units cost {1}", currencyBuy, estimatedCost);
-			}
+			// Calculate actual quote
+			int estimatedCost = CalculateRealMoneyCost(currencyBuy);
+			
+			response["success"] = OSD.FromBoolean(true);
+			
+			var currencyData = new OSDMap();
+			currencyData["estimatedCost"] = OSD.FromInteger(estimatedCost);
+			currencyData["currencyBuy"] = OSD.FromInteger(currencyBuy);
+			
+			response["currency"] = currencyData;
+			response["confirm"] = OSD.FromString(GenerateConfirmationHash(agentId, httpRequest.RemoteIPEndPoint.Address.ToString()));
+			
+			m_log.InfoFormat("[MONEY MODULE]: Currency quote - {0} units cost {1}", currencyBuy, estimatedCost);
 
 			httpResponse.ContentType = "application/llsd+xml";
 			httpResponse.StatusCode = 200;
