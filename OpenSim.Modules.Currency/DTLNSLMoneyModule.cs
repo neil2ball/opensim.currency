@@ -432,40 +432,28 @@ namespace OpenSim.Modules.Currency
 				{
 					try
 					{
-						// Use a proper StreamHandler instead of RestStreamHandler for CAPS
-						var handler = new RestStreamHandler("POST", "",
-						(requestBody, path, param, httpRequest, httpResponse) =>
-						{
-							try
-							{
-								return HandleCapsCurrencyRequest(requestBody, httpRequest, httpResponse);
-							}
-							catch (Exception ex)
-							{
-								m_log.ErrorFormat("[MONEY MODULE]: Exception in Currency CAPS handler: {0}", ex);
-								var error = new OSDMap();
-								error["success"] = OSD.FromBoolean(false);
-								error["error"]   = OSD.FromString("Internal server error");
-								httpResponse.StatusCode = 500;
-								httpResponse.ContentType = "application/llsd+xml";
-								return OSDParser.SerializeLLSDXmlString(error);
-							}
-						});
+						// Register the CAPS handler and capture the URL it returns
+						caps.RegisterHandler(
+								"Currency",
+								new RestStreamHandler("POST", "/CAPS/Currency",
+									(requestBody, path, param, httpRequest, httpResponse) =>
+										HandleCapsCurrencyRequest(requestBody, httpRequest, httpResponse)
+								)
+							);
 
-						// Register the Currency CAPS handler
-						caps.RegisterHandler("Currency", handler);
-
-						// Build the CAPS URL
-						m_currencyCapsUrl = scene.RegionInfo.ServerURI.TrimEnd('/') + "/CAPS/" + caps.CapsObjectPath + "/Currency";
+						m_currencyCapsUrl = scene.RegionInfo.ServerURI + caps.CapsObjectPath + "/Currency";
 
 						m_log.InfoFormat(
 							"[MONEY MODULE]: Registered Currency CAPS for agent {0} in region {1}, URL {2}",
 							agentID, scene.RegionInfo.RegionName, m_currencyCapsUrl);
+
+						// Update simulator features immediately so the viewer sees it
+						WireSimulatorFeatures(scene);
 					}
 					catch (Exception ex)
 					{
 						m_log.ErrorFormat(
-							"[MONEY MODULE]: Error registering Currency CAPS via OnRegisterCaps: {0}",
+							"[MONEY MODULE]: Error registering Currency CAPS: {0}",
 							ex.Message);
 					}
 				};
@@ -564,6 +552,13 @@ namespace OpenSim.Modules.Currency
 			}
 
 			RegisterCurrencyCapsCapability(scene);
+			
+			// Force features update after a short delay to ensure CAPS is registered
+			System.Threading.ThreadPool.QueueUserWorkItem(delegate
+			{
+				System.Threading.Thread.Sleep(2000); // Wait 2 seconds for CAPS registration
+				WireSimulatorFeatures(scene);
+			});
 
 			// Wire simulator features (currency symbol, base URI, and CAPS URL)
 			WireSimulatorFeatures(scene);
@@ -2346,80 +2341,138 @@ namespace OpenSim.Modules.Currency
 			m_log.InfoFormat("[MONEY MODULE]: Content-Length: {0}", httpRequest.ContentLength);
 			m_log.InfoFormat("[MONEY MODULE]: Request Body: {0}", requestBody);
 			m_log.InfoFormat("[MONEY MODULE] ===== CAPS CURRENCY REQUEST END =====");
-			m_log.InfoFormat("[MONEY MODULE]: HandleCapsCurrencyRequest: Processing CAPS currency request");
 			
-			// Parse LLSD XML request
-			OSDMap req;
 			try
 			{
-				if (string.IsNullOrEmpty(requestBody))
-				{
-					m_log.WarnFormat("[MONEY MODULE]: HandleCapsCurrencyRequest: Empty request body");
-					// Return a default quote response for empty requests
-					return CreateDefaultQuoteResponse();
-				}
+				OSDMap requestMap = null;
 				
-				req = OSDParser.DeserializeLLSDXml(requestBody) as OSDMap;
-				m_log.InfoFormat("[MONEY MODULE]: HandleCapsCurrencyRequest: Parsed LLSD request: {0}", req != null ? req.ToString() : "NULL");
+				// Parse the LLSD request
+				if (!string.IsNullOrEmpty(requestBody))
+				{
+					try
+					{
+						requestMap = OSDParser.DeserializeLLSDXml(requestBody) as OSDMap;
+						m_log.InfoFormat("[MONEY MODULE]: Parsed LLSD request: {0}", requestMap != null ? requestMap.ToString() : "NULL");
+					}
+					catch (Exception parseEx)
+					{
+						m_log.WarnFormat("[MONEY MODULE]: LLSD parse failed, trying JSON: {0}", parseEx.Message);
+						// Try JSON format as fallback
+						requestMap = OSDParser.DeserializeJson(requestBody) as OSDMap;
+					}
+				}
+
+				string action = "quote"; // Default action
+				int currencyBuy = 1000;  // Default amount
+				
+				if (requestMap != null)
+				{
+					if (requestMap.ContainsKey("action"))
+						action = requestMap["action"].AsString().ToLower();
+						
+					if (requestMap.ContainsKey("currencyBuy"))
+						currencyBuy = requestMap["currencyBuy"].AsInteger();
+				}
+
+				m_log.InfoFormat("[MONEY MODULE]: Currency CAPS request - Action: {0}, Amount: {1}", action, currencyBuy);
+
+				if (action == "quote")
+				{
+					return HandleCurrencyQuoteCaps(currencyBuy, httpRequest, httpResponse);
+				}
+				else if (action == "buy")
+				{
+					return HandleCurrencyBuyCaps(requestMap, httpRequest, httpResponse);
+				}
+				else
+				{
+					m_log.WarnFormat("[MONEY MODULE]: Unknown currency action: {0}", action);
+					return CreateErrorResponse("Unknown action", httpResponse);
+				}
 			}
 			catch (Exception ex)
 			{
-				m_log.ErrorFormat("[MONEY MODULE]: Currency CAPS parse error: {0}, Request body: {1}", ex, requestBody);
-				
-				// Try alternative parsing for Firestorm
-				return HandleAlternativeCapsRequest(requestBody, httpRequest, httpResponse);
+				m_log.ErrorFormat("[MONEY MODULE]: Currency CAPS handler error: {0}", ex);
+				return CreateErrorResponse("Internal server error", httpResponse);
 			}
+		}
 
-			string action = req != null && req.ContainsKey("action") ? req["action"].AsString() : "quote";
-			int currencyBuy = req != null && req.ContainsKey("currencyBuy") ? req["currencyBuy"].AsInteger() : 1000;
+		private string HandleCurrencyQuoteCaps(int currencyBuy, IOSHttpRequest httpRequest, IOSHttpResponse httpResponse)
+		{
+			m_log.InfoFormat("[MONEY MODULE]: Handling currency quote for {0} units", currencyBuy);
+			
+			var response = new OSDMap();
+			response["success"] = OSD.FromBoolean(true);
 
-			m_log.InfoFormat("[MONEY MODULE]: HandleCapsCurrencyRequest: Action={0}, CurrencyBuy={1}", action, currencyBuy);
+			var currencyData = new OSDMap();
+			
+			// Calculate cost - adjust these values based on your economy
+			int estimatedCost = CalculateRealMoneyCost(currencyBuy);
+			currencyData["estimatedCost"] = OSD.FromInteger(estimatedCost);
+			currencyData["currencyBuy"] = OSD.FromInteger(currencyBuy);
+			
+			response["currency"] = currencyData;
+			response["confirm"] = OSD.FromString(GenerateConfirmationHash(UUID.Zero, httpRequest.RemoteIPEndPoint.Address.ToString()));
 
-			if (string.Equals(action, "quote", StringComparison.OrdinalIgnoreCase))
+			httpResponse.ContentType = "application/llsd+xml";
+			httpResponse.StatusCode = 200;
+			
+			string responseString = OSDParser.SerializeLLSDXmlString(response);
+			m_log.InfoFormat("[MONEY MODULE]: Currency quote response: {0}", responseString);
+			return responseString;
+		}
+
+		private string HandleCurrencyBuyCaps(OSDMap request, IOSHttpRequest httpRequest, IOSHttpResponse httpResponse)
+		{
+			m_log.InfoFormat("[MONEY MODULE]: Handling currency buy request");
+			
+			// Handle redirect if enabled
+			if (m_redirectEnabled)
 			{
-				// Build quote response
-				var resp = new OSDMap();
-				resp["success"] = OSD.FromBoolean(true);
-
-				var currency = new OSDMap();
-				int estimatedCost = CalculateRealMoneyCost(currencyBuy);
-				currency["estimatedCost"] = OSD.FromInteger(estimatedCost);
-				currency["currencyBuy"] = OSD.FromInteger(currencyBuy);
-
-				resp["currency"] = currency;
-				resp["confirm"] = OSD.FromString(GenerateConfirmationHash(UUID.Zero, httpRequest.RemoteIPEndPoint.Address.ToString()));
-
+				UUID agentId = UUID.Zero;
+				int currencyBuy = 1000;
+				
+				if (request != null)
+				{
+					if (request.ContainsKey("agentId"))
+						UUID.TryParse(request["agentId"].AsString(), out agentId);
+					if (request.ContainsKey("currencyBuy"))
+						currencyBuy = request["currencyBuy"].AsInteger();
+				}
+				
+				var response = new OSDMap();
+				response["success"] = OSD.FromBoolean(false);
+				response["errorMessage"] = OSD.FromString(m_redirectMessage);
+				response["errorURI"] = OSD.FromString(m_redirectUrl + "?agentId=" + agentId.ToString() + "&amount=" + currencyBuy);
+				
 				httpResponse.ContentType = "application/llsd+xml";
 				httpResponse.StatusCode = 200;
-				
-				string responseString = OSDParser.SerializeLLSDXmlString(resp);
-				m_log.InfoFormat("[MONEY MODULE]: HandleCapsCurrencyRequest: Returning quote response: {0}", responseString);
-				return responseString;
-			}
-			else if (string.Equals(action, "buy", StringComparison.OrdinalIgnoreCase))
-			{
-				// Handle purchase
-				bool ok = PerformCurrencyPurchase(req);
-				var resp = new OSDMap();
-				resp["success"] = OSD.FromBoolean(ok);
-
-				if (!ok)
-					resp["error"] = OSD.FromString("Purchase failed");
-
-				httpResponse.ContentType = "application/llsd+xml";
-				httpResponse.StatusCode = ok ? 200 : 400;
-				return OSDParser.SerializeLLSDXmlString(resp);
+				return OSDParser.SerializeLLSDXmlString(response);
 			}
 			else
 			{
-				m_log.WarnFormat("[MONEY MODULE]: HandleCapsCurrencyRequest: Unknown action: {0}", action);
-				var err = new OSDMap();
-				err["success"] = OSD.FromBoolean(false);
-				err["error"] = OSD.FromString("Unknown action");
-				httpResponse.StatusCode = 400;
+				// Process purchase directly
+				bool success = PerformCurrencyPurchase(request);
+				var response = new OSDMap();
+				response["success"] = OSD.FromBoolean(success);
+				
+				if (!success)
+					response["error"] = OSD.FromString("Purchase failed");
+					
 				httpResponse.ContentType = "application/llsd+xml";
-				return OSDParser.SerializeLLSDXmlString(err);
+				httpResponse.StatusCode = success ? 200 : 400;
+				return OSDParser.SerializeLLSDXmlString(response);
 			}
+		}
+
+		private string CreateErrorResponse(string message, IOSHttpResponse httpResponse)
+		{
+			var error = new OSDMap();
+			error["success"] = OSD.FromBoolean(false);
+			error["error"] = OSD.FromString(message);
+			httpResponse.StatusCode = 400;
+			httpResponse.ContentType = "application/llsd+xml";
+			return OSDParser.SerializeLLSDXmlString(error);
 		}
 
 		private string CreateDefaultQuoteResponse()
@@ -2712,22 +2765,30 @@ namespace OpenSim.Modules.Currency
 		/// </summary>
 		private int CalculateRealMoneyCost(int currencyAmount)
 		{
-			double rate = 0.001; // Adjust based on your economy
+			// Adjust this calculation based on your economy
+			// Example: $1.00 = 1000 currency units
+			double rate = 0.001; 
 			return (int)Math.Ceiling(currencyAmount * rate * 100); // Return in cents
 		}
 
-		/// <summary>
-		/// Generate a secure confirmation hash for purchase validation
-		/// </summary>
 		private string GenerateConfirmationHash(UUID agentId, string ipAddress)
 		{
-			string secret = "your-secret-key"; // Should be configurable
+			// Create a simple hash for transaction confirmation
+			string secret = "your-secret-key-here"; // Should be configurable
 			string data = $"{agentId}_{ipAddress}_{secret}_{DateTime.UtcNow:yyyyMMddHH}";
 			using (var md5 = MD5.Create())
 			{
 				byte[] hash = md5.ComputeHash(Encoding.UTF8.GetBytes(data));
 				return BitConverter.ToString(hash).Replace("-", "").ToLower();
 			}
+		}
+
+		private bool PerformCurrencyPurchase(OSDMap request)
+		{
+			// Implement your actual purchase logic here
+			// For now, return true to simulate success
+			m_log.InfoFormat("[MONEY MODULE]: Simulated currency purchase");
+			return true;
 		}
 
 		/// <summary>
@@ -3873,43 +3934,49 @@ namespace OpenSim.Modules.Currency
 		{
 			var featuresModule = scene.RequestModuleInterface<ISimulatorFeaturesModule>();
 			if (featuresModule == null)
+			{
+				m_log.Warn("[MONEY MODULE]: ISimulatorFeaturesModule not found - currency features disabled");
 				return;
+			}
 
-			// Static extras
+			// Add static currency features
 			featuresModule.AddOpenSimExtraFeature("currency", OSD.FromString(m_currencySymbol));
 			featuresModule.AddOpenSimExtraFeature("currency-base-uri", OSD.FromString(m_currencyBaseUri));
-
-			// Dynamic hook
+			
+			// Add dynamic features including CAPS URL
 			featuresModule.OnSimulatorFeaturesRequest += (UUID requestingAgentID, ref OSDMap features) =>
 			{
 				if (!features.ContainsKey("currency"))
 					features["currency"] = OSD.FromString(m_currencySymbol);
+					
 				if (!features.ContainsKey("currency-base-uri"))
 					features["currency-base-uri"] = OSD.FromString(m_currencyBaseUri);
 
+				// CRITICAL: Add the Currency CAPS URL that Firestorm expects
 				if (!string.IsNullOrEmpty(m_currencyCapsUrl))
+				{
 					features["Currency"] = OSD.FromString(m_currencyCapsUrl);
+					m_log.InfoFormat("[MONEY MODULE]: Added Currency CAPS URL to features: {0}", m_currencyCapsUrl);
+				}
+				else
+				{
+					m_log.Warn("[MONEY MODULE]: Currency CAPS URL is empty - viewer currency may not work");
+				}
+
+				// Add other currency-related features Firestorm might expect
+				if (!features.ContainsKey("OpenSimExtras"))
+					features["OpenSimExtras"] = new OSDMap();
+					
+				OSDMap opensimExtras = features["OpenSimExtras"] as OSDMap;
+				if (opensimExtras != null)
+				{
+					opensimExtras["currency"] = OSD.FromString(m_currencySymbol);
+					opensimExtras["currency-base-uri"] = OSD.FromString(m_currencyBaseUri);
+				}
 			};
 
 			m_log.Info("[MONEY MODULE]: SimulatorFeatures currency extras wired");
 		}
-		
-		private bool PerformCurrencyPurchase(OSDMap req)
-		{
-			// Extract agentId and amount if present
-			UUID agentId = UUID.Zero;
-			if (req.ContainsKey("agentId"))
-				UUID.TryParse(req["agentId"].AsString(), out agentId);
-
-			int currencyBuy = req.ContainsKey("currencyBuy") ? req["currencyBuy"].AsInteger() : 0;
-
-			m_log.InfoFormat("[MONEY MODULE]: Simulated purchase: agent {0} buying {1} units", agentId, currencyBuy);
-
-			// Here you would normally debit real money, update balances, etc.
-			// For now, just return true to simulate success
-			return true;
-		}
-
 
         #endregion
     }
