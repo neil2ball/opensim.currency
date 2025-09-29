@@ -434,13 +434,16 @@ namespace OpenSim.Modules.Currency
 					{
 						// Register the CAPS handler and capture the URL it returns
 						UUID uuid = UUID.Random();
-						string capsObjectPath = "/CAPS/" + uuid;
-						        caps.RegisterHandler("Currency",
+						string capsObjectPath = "/CAPS/" + uuid + "/currency.php";
+						        caps.RegisterHandler("currency.php",
 									new RestStreamHandler("POST", capsObjectPath,
-										(request, path, param, httpRequest, httpResponse) =>
-											HandleCapsCurrencyRequest(request, httpRequest, httpResponse)));
+										(body, path, param, httpRequest, httpResponse) =>
+										{
+											return ProcessCurrencyPHP(path, body, httpRequest, httpResponse);
+										}));
 
-						m_currencyCapsUrl = scene.RegionInfo.ServerURI + "CAPS/" + uuid;
+
+						m_currencyCapsUrl = scene.RegionInfo.ServerURI.TrimEnd('/') + capsObjectPath;
 						
 						m_log.InfoFormat(
 							"[MONEY MODULE]: Registered Currency CAPS for agent {0} in region {1}, URL {2}",
@@ -497,8 +500,8 @@ namespace OpenSim.Modules.Currency
 				{
 					//HttpServer = new BaseHttpServer(9000);
 
-					MainServer.Instance.AddSimpleStreamHandler(new SimpleStreamHandler("/currency.php", ProcessCurrencyPHP_Simple));
-					MainServer.Instance.AddSimpleStreamHandler(new SimpleStreamHandler("/landtool.php", ProcessLandtoolPHP));
+					//MainServer.Instance.AddSimpleStreamHandler(new SimpleStreamHandler("/currency.php", ProcessCurrencyPHP_Simple));
+					//MainServer.Instance.AddSimpleStreamHandler(new SimpleStreamHandler("/landtool.php", ProcessLandtoolPHP));
 
 					/*MainServer.Instance.AddStreamHandler(
 						new RestStreamHandler("GET", "/currency/balance",
@@ -2538,7 +2541,7 @@ namespace OpenSim.Modules.Currency
 		/// <summary>
 		/// Process currency.php requests - with correct SimpleStreamHandler signature
 		/// </summary>
-		public void ProcessCurrencyPHP_Simple(IOSHttpRequest request, IOSHttpResponse response)
+		/*public void ProcessCurrencyPHP_Simple(IOSHttpRequest request, IOSHttpResponse response)
 		{
 			m_log.InfoFormat("[MONEY MODULE]: ProcessCurrencyPHP_Simple: Handling currency.php request");
 
@@ -2553,11 +2556,11 @@ namespace OpenSim.Modules.Currency
 				// Call the REST handler which returns a string
 				string result = ProcessCurrencyPHP(path, inputStream, osRequest, osResponse);
 
-				// Write the result to the response
+				// Always flush the response, even if result is empty
 				if (!string.IsNullOrEmpty(result))
 				{
 					byte[] buffer = Encoding.UTF8.GetBytes(result);
-					response.ContentType = "text/html";
+					response.ContentType = "text/xml";
 					response.ContentLength = buffer.Length;
 					response.OutputStream.Write(buffer, 0, buffer.Length);
 					response.OutputStream.Flush();
@@ -2569,63 +2572,62 @@ namespace OpenSim.Modules.Currency
 				response.StatusCode = 500;
 				response.StatusDescription = "Internal server error";
 			}
-		}
+		}*/
 
 		/// <summary>
 		/// Process currency.php requests - with correct RestMethod signature
 		/// </summary>
-		public string ProcessCurrencyPHP(string path, Stream request,
+		public string ProcessCurrencyPHP(string path, string body,
 										 IOSHttpRequest httpRequest, IOSHttpResponse httpResponse)
 		{
-			m_log.InfoFormat("[MONEY MODULE]: ProcessCurrencyPHP: Handling currency request for path: {0}", httpRequest.Url.ToString());
+			m_log.InfoFormat("[MONEY MODULE]: ProcessCurrencyPHP: Handling currency request for path: {0}", httpRequest.Url);
 
 			try
 			{
-				string absPath = httpRequest.Url.AbsolutePath.ToLower();
-
-				/*if (absPath.Contains("/currency/quote"))
+				var rpcHandlers = new Dictionary<string, XmlRpcMethod>
 				{
-					HandleCurrencyQuote(httpRequest, httpResponse);
-				}
-				else if (absPath.Contains("/currency/buy"))
-				{
-					HandleCurrencyBuy(httpRequest, httpResponse);
-				}
-				else if (absPath.Contains("/currency/balance"))
-				{
-					HandleCurrencyBalance(httpRequest, httpResponse);
-				}
-				else
-				{*/
-					// Fallback to XML-RPC for legacy endpoints
-					Dictionary<string, XmlRpcMethod> rpcHandlers = new Dictionary<string, XmlRpcMethod>();
-					rpcHandlers["getCurrencyQuote"] = new XmlRpcMethod(GetCurrencyQuoteHandler);
-					rpcHandlers["buyCurrency"] = new XmlRpcMethod(BuyCurrencyHandler);
-					rpcHandlers["money_balance_request"] = new XmlRpcMethod(SimulatorUserBalanceRequestHandler);
-					rpcHandlers["money_transfer_request"] = new XmlRpcMethod(RegionMoveMoneyHandler);
+					["getCurrencyQuote"]      = new XmlRpcMethod(GetCurrencyQuoteHandler),
+					["buyCurrency"]           = new XmlRpcMethod(BuyCurrencyHandler),
+					["money_balance_request"] = new XmlRpcMethod(SimulatorUserBalanceRequestHandler),
+					["money_transfer_request"]= new XmlRpcMethod(RegionMoveMoneyHandler)
+				};
 
-					// MainServer still requires concrete types, so cast here
-					var osRequest = httpRequest as OSHttpRequest;
-					var osResponse = httpResponse as OSHttpResponse;
+				// Wrap the body string in a StringReader for the XML‑RPC deserializer
+				XmlRpcRequest rpcRequest;
+				using (var reader = new StringReader(body))
+				{
+					var deserializer = new XmlRpcRequestDeserializer();
+					rpcRequest = (XmlRpcRequest)deserializer.Deserialize(reader);
+				}
 
-					if (osRequest != null && osResponse != null)
-					{
-						MainServer.Instance.HandleXmlRpcRequests(osRequest, osResponse, rpcHandlers);
-					}
-					else
-					{
-						m_log.Error("[MONEY MODULE]: Could not cast to OSHttpRequest/OSHttpResponse for legacy XML-RPC handling");
-					}
-				//}
+				if (!rpcHandlers.TryGetValue(rpcRequest.MethodName, out var handler))
+				{
+					m_log.WarnFormat("[MONEY MODULE]: Unknown XML-RPC method {0}", rpcRequest.MethodName);
+					SendErrorResponse(httpResponse, 400, "Unknown method");
+					return string.Empty;
+				}
+
+				IPEndPoint remote = httpRequest.RemoteIPEndPoint;
+				XmlRpcResponse rpcResponse = handler(rpcRequest, remote);
+
+				var serializer = new XmlRpcResponseSerializer();
+				string responseXml = serializer.Serialize(rpcResponse);
+
+				byte[] buffer = Encoding.UTF8.GetBytes(responseXml);
+				httpResponse.ContentType = "text/xml";
+				httpResponse.ContentLength = buffer.Length;
+				httpResponse.OutputStream.Write(buffer, 0, buffer.Length);
+				httpResponse.OutputStream.Flush();
 			}
 			catch (Exception ex)
 			{
-				m_log.ErrorFormat("[MONEY MODULE]: ProcessCurrencyPHP error: {0}", ex.Message);
+				m_log.ErrorFormat("[MONEY MODULE]: ProcessCurrencyPHP error: {0}", ex);
 				SendErrorResponse(httpResponse, 500, "Internal server error");
 			}
 
-			return string.Empty; // Required by RestMethod delegate
+			return string.Empty;
 		}
+
 
 		/// <summary>
 		/// Process landtool.php requests - with correct SimpleStreamHandler signature
@@ -3930,47 +3932,6 @@ namespace OpenSim.Modules.Currency
 		}
 		
 		// Called during module initialisation/region add
-/*		private void WireSimulatorFeatures(Scene scene)
-		{
-			var featuresModule = scene.RequestModuleInterface<ISimulatorFeaturesModule>();
-			if (featuresModule == null)
-			{
-				m_log.Warn("[MONEY MODULE]: ISimulatorFeaturesModule not found - currency features disabled");
-				return;
-			}
-
-			// Add static currency features
-			featuresModule.AddOpenSimExtraFeature("currency", OSD.FromString(m_currencySymbol));
-			featuresModule.AddOpenSimExtraFeature("currency-base-uri", OSD.FromString(m_currencyCapsUrl));
-			
-			// Add dynamic features including CAPS URL
-			featuresModule.OnSimulatorFeaturesRequest += (UUID requestingAgentID, ref OSDMap features) =>
-			{
-				//if (!features.ContainsKey("Currency"))
-					//featuresModule.AddFeature("Currency", OSD.FromString(m_currencyCapsUrl));
-					featuresModule.AddFeature("currency-base-uri", OSD.FromString(m_currencyCapsUrl));
-				
-				//if (!features.ContainsKey("currency"))
-					features["currency"] = OSD.FromString(m_currencySymbol);
-					
-				//if (!features.ContainsKey("currency-base-uri"))
-					//features["currency-base-uri"] = OSD.FromString(m_currencyCapsUrl);
-
-				// Add other currency-related features Firestorm might expect
-				if (!features.ContainsKey("OpenSimExtras"))
-					features["OpenSimExtras"] = new OSDMap();
-					
-				OSDMap opensimExtras = features["OpenSimExtras"] as OSDMap;
-				if (opensimExtras != null)
-				{
-					//opensimExtras["Currency"] = OSD.FromString(m_currencyCapsUrl);
-					opensimExtras["currency"] = OSD.FromString(m_currencySymbol);
-					opensimExtras["currency-base-uri"] = OSD.FromString(m_currencyCapsUrl);
-				}
-			};
-
-			m_log.Info("[MONEY MODULE]: SimulatorFeatures currency extras wired");
-		}*/
 		private void WireSimulatorFeatures(Scene scene)
 		{
 			var featuresModule = scene.RequestModuleInterface<ISimulatorFeaturesModule>();
@@ -3999,7 +3960,6 @@ namespace OpenSim.Modules.Currency
 
 			m_log.Info("[MONEY MODULE]: SimulatorFeatures currency extras wired");
 		}
-
         #endregion
     }
 }
