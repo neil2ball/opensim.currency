@@ -1,6 +1,6 @@
 @echo OFF
 
-dotnet ..\bin\prebuild.dll /target vs2022 /targetframework net6_0 /excludedir = "obj | bin" /file prebuild.net.xml
+dotnet ..\bin\prebuild.dll /target vs2022 /targetframework net8_0 /excludedir = "obj | bin" /file prebuild.net.xml
 
     @echo Creating compile.bat
 rem To compile in debug mode

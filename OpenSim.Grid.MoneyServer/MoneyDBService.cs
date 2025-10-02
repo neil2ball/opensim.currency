@@ -243,7 +243,7 @@ namespace OpenSim.Grid.MoneyServer
             transaction.ObjectUUID   = UUID.Zero.ToString();
             transaction.ObjectName   = string.Empty;
             transaction.RegionHandle = string.Empty;
-            transaction.Type         = (int)TransactionType.BirthGift;
+            transaction.Type         = (int)MoneyTransactionType.Gift;
             transaction.Time         = (int)((DateTime.UtcNow.Ticks - TicksToEpoch) / 10000000);;
             transaction.Status       = (int)Status.PENDING_STATUS;
             transaction.SecureCode   = UUID.Random().ToString();
@@ -582,3 +582,4 @@ namespace OpenSim.Grid.MoneyServer
         }
     }
 }
+

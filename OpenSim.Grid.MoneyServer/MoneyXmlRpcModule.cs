@@ -80,12 +80,6 @@ namespace OpenSim.Grid.MoneyServer
 
         private string m_sslCommonName      = "";
 
-        // Add redirect configuration properties
-        private bool   m_redirectEnabled = true;
-        private string m_redirectUrl = "https://eudaimon.me/microtokens/";
-        private string m_redirectMessage = "Please visit our website to purchase currency";
-        private string m_purchaseDisabledMessage = "Direct currency purchases are disabled";
-
         /// <summary>
         /// For server authentication
         /// </summary>
@@ -177,14 +171,6 @@ namespace OpenSim.Grid.MoneyServer
             m_BalanceMessageSendMoney    = m_server_config.GetString("BalanceMessageSendMoney",     m_BalanceMessageSendMoney);
             m_BalanceMessageReceiveMoney = m_server_config.GetString("BalanceMessageReceiveMoney",  m_BalanceMessageReceiveMoney);
 
-            // Add redirect configuration loading
-            m_redirectEnabled = m_server_config.GetBoolean("RedirectEnabled", m_redirectEnabled);
-            m_redirectUrl = m_server_config.GetString("RedirectUrl", m_redirectUrl);
-            m_redirectMessage = m_server_config.GetString("RedirectMessage", m_redirectMessage);
-            m_purchaseDisabledMessage = m_server_config.GetString("PurchaseDisabledMessage", m_purchaseDisabledMessage);
-            
-            m_log.InfoFormat("[MONEY XMLRPC]: Currency redirect enabled: {0}, URL: {1}", m_redirectEnabled, m_redirectUrl);
-
             ////////////////////////////////////////////////////////////////////////
             // [Certificate] Section
 
@@ -269,16 +255,6 @@ namespace OpenSim.Grid.MoneyServer
 
         private XmlRpcResponse buy_func(XmlRpcRequest request, IPEndPoint client)
         {
-            if (m_redirectEnabled)
-            {
-                Hashtable requestData = (Hashtable)request.Params[0];
-                UUID userID = ExtractUserIDFromRequest(requestData);
-                int amount = ExtractAmountFromRequest(requestData);
-                
-                LogRedirectAttempt("buy_func", userID, amount, "currency purchase");
-                return BuildRedirectResponse("Currency purchase requires external verification");
-            }
-            
             m_log.InfoFormat("[MONEY XMLRPC]: handleClient buyCurrency.");
             throw new NotImplementedException();            
         }
@@ -286,22 +262,6 @@ namespace OpenSim.Grid.MoneyServer
 
         private XmlRpcResponse quote_func(XmlRpcRequest request, IPEndPoint client)
         {
-            if (m_redirectEnabled)
-            {
-                // For quote requests, we might want to provide pricing info but still redirect for actual purchase
-                XmlRpcResponse response = new XmlRpcResponse();
-                Hashtable responseData = new Hashtable();
-                
-                responseData["success"] = true;
-                responseData["currency"] = "L$";
-                responseData["redirectRequired"] = true;
-                responseData["message"] = "Actual purchase requires external verification";
-                responseData["purchaseUrl"] = m_redirectUrl;
-                
-                response.Value = responseData;
-                return response;
-            }
-            
             m_log.InfoFormat("[MONEY XMLRPC]: handleClient getCurrencyQuote.");
             throw new NotImplementedException();            
         }
@@ -669,19 +629,19 @@ namespace OpenSim.Grid.MoneyServer
                                     string snd_message = "";
                                     string rcv_message = "";
 
-                                    if (transaction.Type==(int)TransactionType.Gift) {
+                                    if (transaction.Type==(int)MoneyTransactionType.Gift) {
                                         snd_message = m_BalanceMessageSendGift;
                                         rcv_message = m_BalanceMessageReceiveGift;
                                     }
-                                    else if (transaction.Type==(int)TransactionType.LandSale) {
+                                    else if (transaction.Type==(int)MoneyTransactionType.LandSale) {
                                         snd_message = m_BalanceMessageLandSale;
                                         rcv_message = m_BalanceMessageRcvLandSale;
                                     }
-                                    else if (transaction.Type==(int)TransactionType.PayObject) {
+                                    else if (transaction.Type==(int)MoneyTransactionType.PayObject) {
                                         snd_message = m_BalanceMessageBuyObject;
                                         rcv_message = m_BalanceMessageSellObject;
                                     }
-                                    else if (transaction.Type==(int)TransactionType.ObjectPays) {       // ObjectGiveMoney
+                                    else if (transaction.Type==(int)MoneyTransactionType.ObjectPays) {       // ObjectGiveMoney
                                         rcv_message = m_BalanceMessageGetMoney;
                                     }
                         
@@ -797,19 +757,19 @@ namespace OpenSim.Grid.MoneyServer
                             string snd_message = "";
                             string rcv_message = "";
 
-                            if (transaction.Type==(int)TransactionType.Gift) {
+                            if (transaction.Type==(int)MoneyTransactionType.Gift) {
                                 snd_message = m_BalanceMessageSendGift;
                                 rcv_message = m_BalanceMessageReceiveGift;
                             }
-                            else if (transaction.Type==(int)TransactionType.LandSale) {
+                            else if (transaction.Type==(int)MoneyTransactionType.LandSale) {
                                 snd_message = m_BalanceMessageLandSale;
                                 snd_message = m_BalanceMessageRcvLandSale;
                             }
-                            else if (transaction.Type==(int)TransactionType.PayObject) {
+                            else if (transaction.Type==(int)MoneyTransactionType.PayObject) {
                                 snd_message = m_BalanceMessageBuyObject;
                                 rcv_message = m_BalanceMessageSellObject;
                             }
-                            else if (transaction.Type==(int)TransactionType.ObjectPays) {       // ObjectGiveMoney
+                            else if (transaction.Type==(int)MoneyTransactionType.ObjectPays) {       // ObjectGiveMoney
                                 rcv_message = m_BalanceMessageGetMoney;
                             }
                         
@@ -972,17 +932,6 @@ namespace OpenSim.Grid.MoneyServer
         /// <returns></returns>
         public XmlRpcResponse handleAddBankerMoney(XmlRpcRequest request, IPEndPoint remoteClient)
         {
-            if (m_redirectEnabled)
-            {
-                Hashtable requestData = (Hashtable)request.Params[0];
-                UUID userID = ExtractUserIDFromRequest(requestData);
-                int amount = ExtractAmountFromRequest(requestData);
-                
-                LogRedirectAttempt("handleAddBankerMoney", userID, amount, "currency purchase");
-                return BuildRedirectResponse();
-            }
-            
-            // Original implementation when redirect is disabled
             //m_log.InfoFormat("[MONEY XMLRPC]: handleAddBankerMoney:");
 
             GetSSLCommonName(request);
@@ -1205,7 +1154,7 @@ namespace OpenSim.Grid.MoneyServer
                         bool updateReceiv = true;
                         if (transaction.Sender==transaction.Receiver) updateSender = false;
                         //if (transaction.Type==(int)TransactionType.UploadCharge) return true;
-                        if (transaction.Type==(int)TransactionType.UploadCharge) updateReceiv = false;
+                        if (transaction.Type==(int)MoneyTransactionType.UploadCharge) updateReceiv = false;
 
                         if (updateSender) {
                             UserInfo receiverInfo = m_moneyDBService.FetchUserInfo(transaction.Receiver);
@@ -1223,7 +1172,7 @@ namespace OpenSim.Grid.MoneyServer
                         }
 
                         // Notify to sender
-                        if (transaction.Type==(int)TransactionType.PayObject) {
+                        if (transaction.Type==(int)MoneyTransactionType.PayObject) {
                             m_log.InfoFormat("[MONEY XMLRPC]: NotifyTransfer: Now notify opensim to give object to customer {0} ", transaction.Sender);
                             Hashtable requestTable = new Hashtable();
                             requestTable["clientUUID"]   = transaction.Sender;
@@ -1852,73 +1801,8 @@ namespace OpenSim.Grid.MoneyServer
             responseData["errorMessage"] = "Session check failure, please re-login";
             return response;
         }
-
-        //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-        // Redirect functionality methods
-
-        private XmlRpcResponse BuildRedirectResponse(string customMessage = null)
-        {
-            XmlRpcResponse response = new XmlRpcResponse();
-            Hashtable responseData = new Hashtable();
-            
-            responseData["success"] = false;
-            responseData["redirect"] = true;
-            responseData["message"] = customMessage ?? m_redirectMessage;
-            responseData["url"] = m_redirectUrl;
-            
-            response.Value = responseData;
-            return response;
-        }
-
-        private XmlRpcResponse BuildErrorResponse(string message)
-        {
-            XmlRpcResponse response = new XmlRpcResponse();
-            Hashtable responseData = new Hashtable();
-            
-            responseData["success"] = false;
-            responseData["message"] = message;
-            
-            response.Value = responseData;
-            return response;
-        }
-
-        private void LogRedirectAttempt(string method, UUID userID, int amount, string description)
-        {
-            m_log.InfoFormat("[MONEY XMLRPC]: {0} - Redirected {1} attempt by {2} for {3} units to {4}", 
-                method, description, userID, amount, m_redirectUrl);
-        }
-
-        private UUID ExtractUserIDFromRequest(Hashtable requestData)
-        {
-            try
-            {
-                if (requestData.ContainsKey("bankerID"))
-                    return new UUID((string)requestData["bankerID"]);
-                if (requestData.ContainsKey("clientUUID"))
-                    return new UUID((string)requestData["clientUUID"]);
-                if (requestData.ContainsKey("agentId"))
-                    return new UUID((string)requestData["agentId"]);
-            }
-            catch (Exception ex)
-            {
-                m_log.WarnFormat("[MONEY XMLRPC]: Error extracting user ID: {0}", ex.Message);
-            }
-            return UUID.Zero;
-        }
-
-        private int ExtractAmountFromRequest(Hashtable requestData)
-        {
-            try
-            {
-                if (requestData.ContainsKey("amount"))
-                    return Convert.ToInt32(requestData["amount"]);
-            }
-            catch (Exception ex)
-            {
-                m_log.WarnFormat("[MONEY XMLRPC]: Error extracting amount: {0}", ex.Message);
-            }
-            return 0;
-        }
     }
 
 }
+
+
