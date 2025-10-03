@@ -1,0 +1,8 @@
+# Default: normalize all text files to LF
+* text=auto eol=lf
+
+# Explicitly mark binary files so Git never touches them
+*.png binary
+*.jpg binary
+*.exe binary
+*.dll binary

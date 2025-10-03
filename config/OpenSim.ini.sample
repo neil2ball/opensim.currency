@@ -1,48 +1,82 @@
 [Economy]
 
-    ;; Enables selling things for $0.  Default is true.
-    SellEnabled = true
-
-    ;CurrencyServer = "" ;;  ex.) "https://jogrid.net:8008/"  Default is ""
-    EconomyModule = DTLNSLMoneyModule
+    ;; Enables selling.  Default is true.
+    ; SellEnabled = true
+	
+	;
+	;; the economy module in use
+    ;; To use other modules you need to override this setting
+    ; economymodule = BetaGridLikeMoneyModule
+     EconomyModule = DTLNSLMoneyModule
 
     ;
+    ;; This setting points to the XMLRPC server that handles your transaction database. This is the server the module normally talks to. You usually need this unless you are using the Rest API exclusively.
+    ; CurrencyServer = "" ;;  ex.) "https://jogrid.net:8008/"  Default is ""
+	
+	;
+	;; This switch enables the region to serve currency.php and landtool.php helpers. If you're using something else, you can switch it to false. The default is true.
+	; UseInternalHelpers = true
+	
+	;
+	;; This is the url of the economy service (also known as helperURI).
+	;; It defaults to the region server URI. It also sets currency-base-uri for modern viewers. If you have a grid-wide helpers service, you can point this there.
+	; economy = https://helpers.eudaimon.me/
+	
+	;
+	;; This defaults to a generic symbol. Change it or leave it.
+	; CurrencySymbol = "¤" 
+	
+	;
+	;; This enables the use of a custom Rest API written for Wallet System for WooCommerce. It also relies on w4os being installed on your WordPress site. It defaults to false.
+	; UseRestApi = false
+	
+	;
+	;; This is to use the Rest API exculsively. It should disable XML-RPC CurrencyServer communications only.
+	;; This defaults to false. However, when SellEnabled is true and the CurrencyServer is not set, its value becomes true.
+    ; EnableRestApiOnly = true
+	
+	;
+	;; This is the standard location of the Wallet System for WooCommerce Rest API.
+    ; RestBaseUrl = "https://eudaimon.me/wp-json/wsfw-route/v1/wallet/"
+	
+	;
+	;; These are provided by Wallet System for WooCommerce. You need them to communicate with the Rest API.
+    ; ConsumerKey    = "9f2d4a6c8b1e3f709c5a2d8e4f6b7c1d"
+    ; ConsumerSecret = "e3c7a9f5d2b8c4a1f6e9d3b7a5c1f2d8"
+	
+    ;
 	;; CA
-    ;CheckServerCert = false
-    ;CACertFilename  = "cacert.crt"
+    ; CheckServerCert = false
+    ; CACertFilename  = "cacert.crt"
 
     ;
     ;; Client Cert
-    ;ClientCertFilename = "region_cert.p12"
-    ;ClientCertPassword = ""
+    ; ClientCertFilename = "region_cert.p12"
+    ; ClientCertPassword = ""
 
     ;
     ;; Money Unit fee to upload textures, animations etc.  Default is 0.
-    PriceUpload = 10
-
+    ; PriceUpload = 10
+    
+	;
     ;; Mesh upload factors
-    ;MeshModelUploadCostFactor = 0.0
-    ;MeshModelUploadTextureCostFactor = 1.0
-    ;MeshModelMinCostFactor = 0.0
+    ; MeshModelUploadCostFactor = 0.0
+    ; MeshModelUploadTextureCostFactor = 1.0
+    ; MeshModelMinCostFactor = 0.0
 
+    ;
     ;; Money Unit fee to create groups.  Default is 0.
-    PriceGroupCreate = 10
+    ; PriceGroupCreate = 10
 
 	;
     ;; Avatar Class for HG Avatar
     ;; {ForeignAvatar, HGAvatar, GuestAvatar, LocalAvatar} HGAvatar
     ;; HG Avatar is assumed as a specified avatar class. Default is HGAvatar
     ;; Processing for each avatar class is dependent on Money Server settings.
-    ;HGAvatarAs = "HGAvatar"
+    ; HGAvatarAs = "HGAvatar"
 
     ;
-    ;; in development
-    ;SettlementByWeb   = false
-    ;SettlementURL     = "http://www.jogrid.net"
-    ;SettlementMessage = "Goto the settlement of accounts Web page. (Testing now)"
-	
-	RedirectEnabled = true
-	RedirectUrl = https://eudaimon.me/microtokens/
-	RedirectMessage = Please visit our website to purchase currency
-
-
+    ;; These messages are sent to the user through the region currency.php helper when a currency quote is requested, such as when the "Buy OS$" button is pressed.
+	;; Both an alert and an IM are sent.
+    ; SettlementURL     = "http://www.jogrid.net"
+    ; SettlementMessage = "Goto the settlement of accounts Web page. (Testing now)"
