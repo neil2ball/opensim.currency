@@ -1,3 +1,8 @@
+#This is a modified version that includes three main features:
+1. It builds into the module the ability to communicate with a modified Rest API used by Wallet System for WooCommerce. w4os must also be installed on your WordPress site. See the wallet-system-for-woocommerce folder for necessary drop-in replacements and locations.
+2. Helpers (currency.php and landtool.php) are now built into the module. config/OpenSim.ini.sample includes more details.
+3. "Banker" functions have been removed. They interfered with the ledgering process that the token system is intended to provide by introducing hyperinflation.
+
 # DTL/NSL Secure Money Server
 - by Fumi.Iseki and [NSL](http://www.nsl.tuis.ac.jp)
 - [Wiki](https://polaris.star-dust.jp/pukiwiki/?OpenSim/MoneyServer)

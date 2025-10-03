@@ -232,7 +232,7 @@ namespace OpenSim.Grid.MoneyServer
             m_httpServer.AddXmlRPCHandler("TransferMoney",      handleTransaction);
             m_httpServer.AddXmlRPCHandler("ForceTransferMoney", handleForceTransaction);        // added
             m_httpServer.AddXmlRPCHandler("PayMoneyCharge",     handlePayMoneyCharge);          // added
-            m_httpServer.AddXmlRPCHandler("AddBankerMoney",     handleAddBankerMoney);          // added
+
             m_httpServer.AddXmlRPCHandler("SendMoney",          handleScriptTransaction);       // added
             m_httpServer.AddXmlRPCHandler("MoveMoney",          handleScriptTransaction);       // added
 
@@ -917,109 +917,6 @@ namespace OpenSim.Grid.MoneyServer
             }
             catch (Exception e) {
                 m_log.Error("[MONEY XMLRPC]: handleScriptTransaction: Exception occurred while adding money transaction: " + e.ToString());
-            }
-            return response;
-        }
-
-
-        //
-        // added by Fumi.Iseki
-        //
-        /// <summary>
-        /// handle adding money transaction.
-        /// </summary>
-        /// <param name="request"></param>
-        /// <returns></returns>
-        public XmlRpcResponse handleAddBankerMoney(XmlRpcRequest request, IPEndPoint remoteClient)
-        {
-            //m_log.InfoFormat("[MONEY XMLRPC]: handleAddBankerMoney:");
-
-            GetSSLCommonName(request);
-
-            Hashtable requestData   = (Hashtable)request.Params[0];
-            XmlRpcResponse response = new XmlRpcResponse();
-            Hashtable responseData  = new Hashtable();
-            response.Value = responseData;
-
-            int    amount = 0;
-            int    transactionType = 0;
-            string senderID     = UUID.Zero.ToString();
-            string bankerID     = string.Empty;
-            string regionHandle = "0";
-            string regionUUID   = UUID.Zero.ToString();
-            string description  = "Add Money to Avatar on";
-
-            responseData["success"] = false;
-            UUID transactionUUID = UUID.Random();
-
-            if (requestData.ContainsKey("bankerID"))        bankerID        = (string)requestData["bankerID"];
-            if (requestData.ContainsKey("amount"))          amount          = Convert.ToInt32(requestData["amount"]);
-            if (requestData.ContainsKey("regionHandle"))    regionHandle    = (string)requestData["regionHandle"];
-            if (requestData.ContainsKey("regionUUID"))      regionUUID      = (string)requestData["regionUUID"];
-            if (requestData.ContainsKey("transactionType")) transactionType = Convert.ToInt32(requestData["transactionType"]);
-            if (requestData.ContainsKey("description"))     description     = (string)requestData["description"];
-
-            // Check Banker Avatar
-            if (m_bankerAvatar!=UUID.Zero.ToString() && m_bankerAvatar!=bankerID) {
-                m_log.Error("[MONEY XMLRPC]: handleAddBankerMoney: Not allowed add money to avatar!!");
-                m_log.Error("[MONEY XMLRPC]: handleAddBankerMoney: Set BankerAvatar at [MoneyServer] in MoneyServer.ini");
-                responseData["message"] = "not allowed add money to avatar!";
-                responseData["banker"]  = false;
-                return response;
-            }
-            responseData["banker"] = true;
-
-            m_log.InfoFormat("[MONEY XMLRPC]: handleAddBankerMoney: Add money to avatar {0}", bankerID);
-            int time = (int)((DateTime.UtcNow.Ticks - TicksToEpoch) / 10000000);
-
-            try {
-                TransactionData transaction = new TransactionData();
-                transaction.TransUUID   = transactionUUID;
-                transaction.Sender      = senderID;
-                transaction.Receiver    = bankerID;
-                transaction.Amount      = amount;
-                transaction.ObjectUUID  = UUID.Zero.ToString();
-                transaction.RegionHandle= regionHandle;
-                transaction.RegionUUID  = regionUUID;
-                transaction.Type        = transactionType;
-                transaction.Time        = time;
-                transaction.SecureCode  = UUID.Random().ToString();
-                transaction.Status      = (int)Status.PENDING_STATUS;
-                transaction.CommonName  = GetSSLCommonName();
-                transaction.Description = description + " " + DateTime.UtcNow.ToString();
-
-                UserInfo rcvr = m_moneyDBService.FetchUserInfo(bankerID);
-                if (rcvr==null) {
-                    m_log.ErrorFormat("[MONEY XMLRPC]: handleAddBankerMoney: Avatar is not yet in DB {0}", bankerID);
-                    return response;
-                }
-
-                bool result = m_moneyDBService.addTransaction(transaction);
-                if (result) {
-                    if (amount>0 || (m_enableAmountZero&&amount==0)) {
-                        if (m_moneyDBService.DoAddMoney(transactionUUID)) {
-                            transaction = m_moneyDBService.FetchTransaction(transactionUUID);
-                            if (transaction!=null && transaction.Status==(int)Status.SUCCESS_STATUS) {
-                                m_log.InfoFormat("[MONEY XMLRPC]: handleAddBankerMoney: Adding money finished successfully, now update balance: {0}", 
-                                                                                                                            transactionUUID.ToString());
-                                string message = string.Format(m_BalanceMessageBuyMoney, amount, "SYSTEM", "");
-                                UpdateBalance(transaction.Receiver, message);
-                                responseData["success"] = true;
-                            }
-                        }
-                    }
-                    else if (amount==0) {
-                        responseData["success"] = true;     // No messages for L$0 add
-                    }
-                    return response;
-                }
-                else {  // add transaction failed
-                    m_log.ErrorFormat("[MONEY XMLRPC]: handleAddBankerMoney: Add force transaction for user {0} failed.", senderID);
-                }
-                return response;
-            }
-            catch (Exception e) {
-                m_log.Error("[MONEY XMLRPC]: handleAddBankerMoney: Exception occurred while adding money transaction: " + e.ToString());
             }
             return response;
         }
